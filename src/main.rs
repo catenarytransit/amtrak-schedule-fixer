@@ -1,5 +1,7 @@
 use bytesize::ByteSize;
 use chrono::Datelike;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fs::File;
 use std::io::Cursor;
@@ -65,6 +67,10 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     let mut possible_trip_ids_to_fix: Vec<String> = vec![];
 
+    let mut surfliner_services_to_cancel: Vec<String> = vec![];
+
+    let mut calendar_id_to_route_ids: HashMap<String, HashSet<String>> = HashMap::new();
+
     for (trip_id, trip) in gtfs_initial_read.trips.iter() {
         if gtfs_initial_read.routes.get(trip.route_id.as_str()).unwrap().route_type == gtfs_structures::RouteType::Rail {
             let first_stop_time = &trip.stop_times[0];
@@ -77,6 +83,8 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
             let initial_timezone = chrono_tz::Tz::from_str(initial_timezone_str).unwrap();
 
+            let service = gtfs_initial_read.calendar.get(trip.service_id.as_str()).unwrap();
+
             if initial_timezone != chrono_tz::Tz::America__New_York {
                 let soonest_hr_to_break = match initial_timezone {
                     chrono_tz::Tz::America__Chicago => 1,
@@ -88,8 +96,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 if departure_from_midnight <= (soonest_hr_to_break * 3600) {
                     println!("Potentially broken: {} {} to {}", trip.trip_short_name.as_ref().unwrap(), route.long_name.as_ref().unwrap(), trip.trip_headsign.as_ref().unwrap());
 
-                   let service = gtfs_initial_read.calendar.get(trip.service_id.as_str()).unwrap();
-
                    // println!("{:#?}", service);
 
                     if route.long_name.as_ref().unwrap() != "Pacific Surfliner" {
@@ -97,8 +103,23 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                     }
                 }
             }
+
+            if route.long_name.as_ref().unwrap() == "Pacific Surfliner" {
+               // println!("Surfliner {}", trip.trip_headsign.as_ref().unwrap());
+
+               // println!("{:?}", service);
+
+               surfliner_services_to_cancel.push(service.id.clone());
+            }
+
+            calendar_id_to_route_ids.entry(service.id.clone()).and_modify(|x| {
+                x.insert(route.id.clone());
+            }).or_insert(HashSet::from_iter(vec![route.id.clone()]));
         }
     }
+
+    surfliner_services_to_cancel.sort();
+    surfliner_services_to_cancel.dedup();
 
     let gtfs_raw = gtfs_structures::RawGtfs::from_path(&target_dir)?;
 
