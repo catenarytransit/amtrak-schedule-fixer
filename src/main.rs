@@ -53,6 +53,8 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         zip_extract::extract(Cursor::new(buf), &target_dir, true)?;
     }
 
+    let mut route_ids_to_remove_shapes_from: HashSet<String> = HashSet::new();
+
     //fetch the amtrak route list from their website
 
     //let routes_list_from_website = routes_list::fetch_and_decode_routes(client.clone()).await?;
@@ -70,6 +72,14 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let mut surfliner_services_to_cancel: Vec<String> = vec![];
 
     let mut calendar_id_to_route_ids: HashMap<String, HashSet<String>> = HashMap::new();
+
+    for (route_id, route) in gtfs_initial_read.routes.iter() {
+        if let Some(long_name) = &route.long_name {
+            if long_name.as_str() == "California Zephyr" || long_name.as_str() == "Floridian" {
+                route_ids_to_remove_shapes_from.insert(route_id.clone());
+            }
+        }
+    }
 
     for (trip_id, trip) in gtfs_initial_read.trips.iter() {
         if gtfs_initial_read
@@ -152,6 +162,10 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     for trip in trips_to_process {
         let mut trip = trip;
+
+        if route_ids_to_remove_shapes_from.contains(&trip.route_id) {
+            trip.shape_id = None;
+        }
 
         let calendar = gtfs_initial_read.calendar.get(&trip.service_id).unwrap();
 
