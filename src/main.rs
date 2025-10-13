@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
 
         if is_line_too_stupidly_broken {
-            broken_shape_ids.insert(shape_id.clone());
+            broken_shape_ids.push(shape_id.clone());
         }
     }
 
