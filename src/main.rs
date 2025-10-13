@@ -72,31 +72,48 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let mut calendar_id_to_route_ids: HashMap<String, HashSet<String>> = HashMap::new();
 
     for (trip_id, trip) in gtfs_initial_read.trips.iter() {
-        if gtfs_initial_read.routes.get(trip.route_id.as_str()).unwrap().route_type == gtfs_structures::RouteType::Rail {
+        if gtfs_initial_read
+            .routes
+            .get(trip.route_id.as_str())
+            .unwrap()
+            .route_type
+            == gtfs_structures::RouteType::Rail
+        {
             let first_stop_time = &trip.stop_times[0];
 
             let departure_from_midnight = first_stop_time.departure_time.unwrap();
 
-            let route = gtfs_initial_read.routes.get(trip.route_id.as_str()).unwrap();
-            
+            let route = gtfs_initial_read
+                .routes
+                .get(trip.route_id.as_str())
+                .unwrap();
+
             let initial_timezone_str = first_stop_time.stop.as_ref().timezone.as_ref().unwrap();
 
             let initial_timezone = chrono_tz::Tz::from_str(initial_timezone_str).unwrap();
 
-            let service = gtfs_initial_read.calendar.get(trip.service_id.as_str()).unwrap();
+            let service = gtfs_initial_read
+                .calendar
+                .get(trip.service_id.as_str())
+                .unwrap();
 
             if initial_timezone != chrono_tz::Tz::America__New_York {
                 let soonest_hr_to_break = match initial_timezone {
                     chrono_tz::Tz::America__Chicago => 1,
                     chrono_tz::Tz::America__Denver => 2,
                     chrono_tz::Tz::America__Los_Angeles => 3,
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 };
 
                 if departure_from_midnight <= (soonest_hr_to_break * 3600) {
-                    println!("Potentially broken: {} {} to {}", trip.trip_short_name.as_ref().unwrap(), route.long_name.as_ref().unwrap(), trip.trip_headsign.as_ref().unwrap());
+                    println!(
+                        "Potentially broken: {} {} to {}",
+                        trip.trip_short_name.as_ref().unwrap(),
+                        route.long_name.as_ref().unwrap(),
+                        trip.trip_headsign.as_ref().unwrap()
+                    );
 
-                   // println!("{:#?}", service);
+                    // println!("{:#?}", service);
 
                     if route.long_name.as_ref().unwrap() != "Pacific Surfliner" {
                         possible_trip_ids_to_fix.push(trip_id.clone());
@@ -105,16 +122,19 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             }
 
             if route.long_name.as_ref().unwrap() == "Pacific Surfliner" {
-               // println!("Surfliner {}", trip.trip_headsign.as_ref().unwrap());
+                // println!("Surfliner {}", trip.trip_headsign.as_ref().unwrap());
 
-               // println!("{:?}", service);
+                // println!("{:?}", service);
 
-               surfliner_services_to_cancel.push(service.id.clone());
+                surfliner_services_to_cancel.push(service.id.clone());
             }
 
-            calendar_id_to_route_ids.entry(service.id.clone()).and_modify(|x| {
-                x.insert(route.id.clone());
-            }).or_insert(HashSet::from_iter(vec![route.id.clone()]));
+            calendar_id_to_route_ids
+                .entry(service.id.clone())
+                .and_modify(|x| {
+                    x.insert(route.id.clone());
+                })
+                .or_insert(HashSet::from_iter(vec![route.id.clone()]));
         }
     }
 
@@ -136,7 +156,11 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         let calendar = gtfs_initial_read.calendar.get(&trip.service_id).unwrap();
 
         if possible_trip_ids_to_fix.contains(&trip.id) {
-            let new_calendar = make_calendar_for_trip_short_name(&trip.id, &trip.trip_short_name.as_ref().unwrap(), calendar.clone());
+            let new_calendar = make_calendar_for_trip_short_name(
+                &trip.id,
+                &trip.trip_short_name.as_ref().unwrap(),
+                calendar.clone(),
+            );
 
             if let Some(new_calendar) = new_calendar {
                 trip.service_id = new_calendar.id.clone();
@@ -156,9 +180,13 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     Ok(())
 }
 
-fn make_calendar_for_trip_short_name(trip_id: &str, trip_short_name: &str, calendar: gtfs_structures::Calendar) -> Option<gtfs_structures::Calendar> {
+fn make_calendar_for_trip_short_name(
+    trip_id: &str,
+    trip_short_name: &str,
+    calendar: gtfs_structures::Calendar,
+) -> Option<gtfs_structures::Calendar> {
     let id = format!("catenary-{}-{}", trip_short_name, trip_id);
-    
+
     match trip_short_name {
         "2" => Some(gtfs_structures::Calendar {
             id,
@@ -170,7 +198,7 @@ fn make_calendar_for_trip_short_name(trip_id: &str, trip_short_name: &str, calen
             saturday: true,
             sunday: false,
             start_date: calendar.start_date,
-            end_date: calendar.end_date
+            end_date: calendar.end_date,
         }),
         "343" => Some(gtfs_structures::Calendar {
             id,
@@ -182,11 +210,11 @@ fn make_calendar_for_trip_short_name(trip_id: &str, trip_short_name: &str, calen
             saturday: true,
             sunday: false,
             start_date: calendar.start_date,
-            end_date: calendar.end_date
+            end_date: calendar.end_date,
         }),
         "422" => Some(gtfs_structures::Calendar {
             id,
-             monday: true,
+            monday: true,
             tuesday: false,
             wednesday: false,
             thursday: true,
@@ -194,14 +222,26 @@ fn make_calendar_for_trip_short_name(trip_id: &str, trip_short_name: &str, calen
             saturday: true,
             sunday: false,
             start_date: calendar.start_date,
-            end_date: calendar.end_date
+            end_date: calendar.end_date,
         }),
-        _ => None
+        _ => None,
     }
 }
 
 fn calendar_to_string_to_add(calendar: &gtfs_structures::Calendar) -> String {
-    format!("{},{},{},{},{},{},{},{},{},{}", calendar.id, calendar.monday, calendar.tuesday, calendar.wednesday, calendar.thursday, calendar.friday, calendar.saturday, calendar.sunday, naive_date_to_gtfs_str(&calendar.start_date), naive_date_to_gtfs_str(&calendar.end_date))
+    format!(
+        "{},{},{},{},{},{},{},{},{},{}",
+        calendar.id,
+        calendar.monday,
+        calendar.tuesday,
+        calendar.wednesday,
+        calendar.thursday,
+        calendar.friday,
+        calendar.saturday,
+        calendar.sunday,
+        naive_date_to_gtfs_str(&calendar.start_date),
+        naive_date_to_gtfs_str(&calendar.end_date)
+    )
 }
 
 fn naive_date_to_gtfs_str(date: &chrono::NaiveDate) -> String {
