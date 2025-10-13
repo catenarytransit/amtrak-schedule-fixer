@@ -81,6 +81,27 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
+    let threshold_degree_broken: f64 = 1.0;
+
+    let mut broken_shape_ids: Vec<String> = vec![];
+
+    for (shape_id, shape) in gtfs_initial_read.shapes.iter() {
+        let mut is_line_too_stupidly_broken = false;
+
+        for (idx, point) in shape.iter().enumerate().skip(1) {
+            if (shape[idx - 1].longitude - point.longitude).abs() > threshold_degree_broken
+                || (shape[idx - 1].latitude - point.latitude).abs() > threshold_degree_broken
+            {
+                is_line_too_stupidly_broken = true;
+                break;
+            }
+        }
+
+        if is_line_too_stupidly_broken {
+            broken_shape_ids.insert(shape_id.clone());
+        }
+    }
+
     for (trip_id, trip) in gtfs_initial_read.trips.iter() {
         if gtfs_initial_read
             .routes
@@ -165,6 +186,12 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
         if route_ids_to_remove_shapes_from.contains(&trip.route_id) {
             trip.shape_id = None;
+        }
+
+        if let Some(shape_id) = &trip.shape_id {
+            if broken_shape_ids.contains(&shape_id) {
+                trip.shape_id = None;
+            }
         }
 
         let calendar = gtfs_initial_read.calendar.get(&trip.service_id).unwrap();
