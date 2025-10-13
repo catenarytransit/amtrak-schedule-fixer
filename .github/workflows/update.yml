@@ -26,7 +26,7 @@ jobs:
          run: |
           (cd amtrak-gtfs && zip -r "$OLDPWD/amtrak-gtfs-fixed.zip" .)
 
-       - name: Upload Asset Hong Kong
+       - name: Upload Asset
          env:
           GITHUB_TOKEN: ${{ secrets.GITUHB_TOKEN }}
           GH_TOKEN: ${{ github.token }}
