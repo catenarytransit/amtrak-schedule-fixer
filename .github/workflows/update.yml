@@ -17,12 +17,43 @@ jobs:
        - name: Download unzip and zip
          run: sudo apt install unzip zip
 
+       - name: Install OSM tools
+         run: sudo apt install osmium-tool osmctools -y
+
+       - name: install cmake and gcc
+         run: sudo apt install cmake gcc
+ 
+       - name: Build Pfaedle
+         run: |
+          if ! command -v pfaedle &> /dev/null; then
+            git clone --recurse-submodules https://github.com/ad-freiburg/pfaedle
+            cd pfaedle
+            mkdir build && cd build
+            cmake ..
+            make -j
+            sudo make install
+            cd ..
+          else
+            echo "Pfaedle is already installed."
+          fi
+
+       - name: Download osm files
+         run: |
+          wget https://github.com/catenarytransit/osm-filter/releases/download/latest/railonly-us-latest.osm.pbf
+
+       - name: Convert OSM files
+         run: |
+          osmconvert railonly-us-latest.osm.pbf -o=railonly-us-latest.osm
+
        - uses: actions-rust-lang/setup-rust-toolchain@v1
          with:
            rustflags: ''
        
        - name: Process
          run: cargo run --release
+
+       - name: Run Pfaedle
+         run: pfaedle -x railonly-us-latest.osm amtrak-gtfs -F --inplace --mots rail --write-colors
 
        - name: Rezip
          run: |
