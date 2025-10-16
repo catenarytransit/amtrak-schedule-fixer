@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
-    let threshold_degree_broken: f64 = 1.0;
+    let threshold_degree_broken: f64 = 0.1;
 
     let mut broken_shape_ids: Vec<String> = vec![];
 
