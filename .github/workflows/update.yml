@@ -39,11 +39,11 @@ jobs:
 
        - name: Download osm files
          run: |
-          wget https://github.com/catenarytransit/osm-filter/releases/download/latest/railonly-us-latest.osm.pbf
+          wget https://github.com/catenarytransit/osm-filter/releases/download/latest/railonly-north-america-latest.osm.pbf
 
        - name: Convert OSM files
          run: |
-          osmconvert railonly-us-latest.osm.pbf -o=railonly-us-latest.osm
+          osmconvert railonly-north-america-latest.osm.pbf -o=railonly-north-america-latest.osm
 
        - uses: actions-rust-lang/setup-rust-toolchain@v1
          with:
@@ -53,7 +53,7 @@ jobs:
          run: cargo run --release
 
        - name: Run Pfaedle
-         run: pfaedle -x railonly-us-latest.osm amtrak-gtfs -F --inplace --mots rail --write-colors
+         run: pfaedle -x railonly-north-america-latest.osm amtrak-gtfs -F --inplace --mots rail --write-colors
 
        - name: Rezip
          run: |
