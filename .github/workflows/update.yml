@@ -75,6 +75,7 @@ jobs:
        - name: Make shapeless version
          run: |
             cp -r amtrak-gtfs amtrak-gtfs-noshapes
+            rm -rf amtrak-gtfs-noshapes/shapes.txt
             (cd amtrak-gtfs-noshapes && zip -r "$OLDPWD/amtrak-gtfs-noshapes-fixed.zip" .)
 
        - name: Upload Asset
