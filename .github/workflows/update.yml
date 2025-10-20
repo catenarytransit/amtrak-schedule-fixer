@@ -71,3 +71,21 @@ jobs:
           gh release upload latest "$ASSET_PATH" --clobber
          shell: bash
          if: env.ASSET_PATH != '' && env.ASSET_NAME != ''
+
+       - name: Make shapeless version
+         run: |
+            cp -r amtrak-gtfs amtrak-gtfs-noshapes
+            (cd amtrak-gtfs-noshapes && zip -r "$OLDPWD/amtrak-gtfs-noshapes-fixed.zip" .)
+
+       - name: Upload Asset
+         env:
+          GITHUB_TOKEN: ${{ secrets.GITUHB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          ASSET_PATH: amtrak-gtfs-noshapes-fixed.zip # Replace with the actual path to your file
+          ASSET_NAME: amtrak-gtfs-noshapes-fixed.zip # Replace with the desired name of the asset
+          RELEASE_TAG: latest
+         run: |
+          echo "Uploading asset: $ASSET_PATH as $ASSET_NAME to release latest"
+          gh release upload latest "$ASSET_PATH" --clobber
+         shell: bash
+         if: env.ASSET_PATH != '' && env.ASSET_NAME != ''
