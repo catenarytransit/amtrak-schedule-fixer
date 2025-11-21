@@ -53,7 +53,7 @@ jobs:
          run: cargo run --release
 
        - name: Fix EWR location
-         run: sed -i '/^EWR,/s/40.696618,-74.18229/40.704444, -74.190556/' amtrak-gtfs/stops.txt
+         run: sed -i '/^EWR,/s/40\.696618,-74\.18229/40.704444, -74.190556/' amtrak-gtfs/stops.txt
 
        - name: Run Pfaedle
          run: pfaedle -x railonly-north-america-latest.osm amtrak-gtfs -F --inplace --mots rail --write-colors
