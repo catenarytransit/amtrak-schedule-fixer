@@ -40,10 +40,12 @@ jobs:
        - name: Download osm files
          run: |
           wget https://github.com/catenarytransit/osm-filter/releases/download/latest/railonly-north-america-latest.osm.pbf
+          wget https://github.com/catenarytransit/osm-filter/releases/download/latest/amtrak-thruway.osm.pbf
 
        - name: Convert OSM files
          run: |
           osmconvert railonly-north-america-latest.osm.pbf -o=railonly-north-america-latest.osm
+          osmconvert amtrak-thruway.osm.pbf -o=amtrak-thruway.osm
 
        - uses: actions-rust-lang/setup-rust-toolchain@v1
          with:
@@ -56,7 +58,9 @@ jobs:
          run: sed -i '/^EWR,/s/40\.696618,-74\.18229/40.704444, -74.190556/' amtrak-gtfs/stops.txt
 
        - name: Run Pfaedle
-         run: pfaedle -x railonly-north-america-latest.osm amtrak-gtfs -F --inplace --mots rail --write-colors
+         run: |
+            pfaedle -x railonly-north-america-latest.osm amtrak-gtfs -F --inplace --mots rail --write-colors
+            pfaedle -x amtrak-thruway.osm amtrak-gtfs -F --inplace --mots bus --write-colors
 
        - name: Rezip
          run: |
