@@ -16,6 +16,8 @@ const GTFS_URL: &str = "https://content.amtrak.com/content/gtfs/GTFS.zip";
 
 const DOWNLOAD_AND_UNZIP_INIT: bool = true;
 
+const TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES: [&str; 3] = ["2", "343", "422"];
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let client = reqwest::Client::new();
@@ -59,10 +61,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     println!("Read took {:?}", gtfs_initial_read.read_duration);
 
-    let mut possible_trip_ids_to_fix: Vec<String> = vec![];
-
-    let mut surfliner_services_to_cancel: Vec<String> = vec![];
-
     let mut calendar_id_to_route_ids: HashMap<String, HashSet<String>> = HashMap::new();
 
     // MARK - Removal of broken shapes
@@ -105,11 +103,10 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     // - 00:00~02:00 in Mountain Time
     // - 00:00~03:00 in Pacific Time
     // then it is flagged.
-    // 
-    // Flagged trips are send to possible_trip_ids_to_fix, except for Pacific Surfliner.
+    // Flagged trips are only logged; nothing is done to them.
     // 
     // TODO: Do we need to deal with daylight savings time and weird timezones such as Arizona and Indiana?
-    for (trip_id, trip) in gtfs_initial_read.trips.iter() {
+    for (_, trip) in gtfs_initial_read.trips.iter() {
         if gtfs_initial_read
             .routes
             .get(trip.route_id.as_str())
@@ -152,10 +149,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                     );
 
                     // println!("{:#?}", service);
-
-                    if route.long_name.as_ref().unwrap() != "Pacific Surfliner" {
-                        possible_trip_ids_to_fix.push(trip_id.clone());
-                    }
                 }
             }
 
@@ -196,10 +189,10 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         let calendar = gtfs_initial_read.calendar.get(&trip.service_id).unwrap();
 
         // Fix the calendar for possibly broken trips
-        if possible_trip_ids_to_fix.contains(&trip.id) {
+        if let Some(trip_short_name) = &trip.trip_short_name && TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES.contains(&trip_short_name.as_str()) {
             let new_calendar = make_calendar_for_trip_short_name(
                 &trip.id,
-                &trip.trip_short_name.as_ref().unwrap(),
+                &trip_short_name,
                 calendar.clone(),
             );
 
