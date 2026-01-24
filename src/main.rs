@@ -14,14 +14,6 @@ mod routes_list;
 
 const GTFS_URL: &str = "https://content.amtrak.com/content/gtfs/GTFS.zip";
 
-async fn get_route_data(
-    route: &str,
-    start_date: &chrono::NaiveDate,
-    end_date: &chrono::NaiveDate,
-    client: Option<reqwest::Client>,
-) {
-}
-
 const DOWNLOAD_AND_UNZIP_INIT: bool = true;
 
 #[tokio::main]
@@ -290,24 +282,4 @@ fn make_calendar_for_trip_short_name(
         }),
         _ => None,
     }
-}
-
-fn calendar_to_string_to_add(calendar: &gtfs_structures::Calendar) -> String {
-    format!(
-        "{},{},{},{},{},{},{},{},{},{}",
-        calendar.id,
-        calendar.monday,
-        calendar.tuesday,
-        calendar.wednesday,
-        calendar.thursday,
-        calendar.friday,
-        calendar.saturday,
-        calendar.sunday,
-        naive_date_to_gtfs_str(&calendar.start_date),
-        naive_date_to_gtfs_str(&calendar.end_date)
-    )
-}
-
-fn naive_date_to_gtfs_str(date: &chrono::NaiveDate) -> String {
-    format!("{}{}{}", date.year(), date.month(), date.day())
 }
