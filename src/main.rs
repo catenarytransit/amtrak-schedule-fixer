@@ -230,13 +230,16 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             }
         }
 
-        trip_wtr.serialize(trip);
+        trip_wtr.serialize(trip)?;
     }
 
     //write everything back to the files
     for calendar_raw in calendars_to_write {
-        calendar_wtr.serialize(calendar_raw);
+        calendar_wtr.serialize(calendar_raw)?;
     }
+
+    trip_wtr.flush()?;
+    calendar_wtr.flush()?;
 
     Ok(())
 }
