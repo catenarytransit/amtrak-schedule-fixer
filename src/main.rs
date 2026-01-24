@@ -73,6 +73,9 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     let mut calendar_id_to_route_ids: HashMap<String, HashSet<String>> = HashMap::new();
 
+    // MARK - Removal of broken shapes
+
+    // TODO: Document why California Zephyr and Floridian are broken
     for (route_id, route) in gtfs_initial_read.routes.iter() {
         if let Some(long_name) = &route.long_name {
             if long_name.as_str() == "California Zephyr" || long_name.as_str() == "Floridian" {
@@ -81,6 +84,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
+    // Check shapes for jumps of more than 0.1 degrees longitude or latitude
     let threshold_degree_broken: f64 = 0.1;
 
     let mut broken_shape_ids: Vec<String> = vec![];
@@ -102,6 +106,18 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
+    // MARK - Check trips for departure after midnight in non-Eastern timezones
+    // 
+    // If a trip departs at:
+    // - 00:00~01:00 in Central Time
+    // - 00:00~02:00 in Mountain Time
+    // - 00:00~03:00 in Pacific Time
+    // then it is flagged.
+    // 
+    // Flagged trips are send to possible_trip_ids_to_fix, except for Pacific Surfliner.
+    // All Pacific Surfliner trips, regardless of departure time, are sent to surfliner_services_to_cancel.
+    // 
+    // TODO: Do we need to deal with daylight savings time and weird timezones such as Arizona and Indiana?
     for (trip_id, trip) in gtfs_initial_read.trips.iter() {
         if gtfs_initial_read
             .routes
@@ -172,6 +188,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     surfliner_services_to_cancel.sort();
     surfliner_services_to_cancel.dedup();
 
+    // MARK - Rewrite trips.txt and calendar.txt
     let gtfs_raw = gtfs_structures::RawGtfs::from_path(&target_dir)?;
 
     let mut trip_wtr = csv::Writer::from_path("./amtrak-gtfs/trips.txt")?;
@@ -184,6 +201,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     for trip in trips_to_process {
         let mut trip = trip;
 
+        // Remove all bad and broken shapes
         if route_ids_to_remove_shapes_from.contains(&trip.route_id) {
             trip.shape_id = None;
         }
@@ -194,8 +212,10 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             }
         }
 
+        // Apply calendar
         let calendar = gtfs_initial_read.calendar.get(&trip.service_id).unwrap();
 
+        // Fix the calendar for possibly broken trips
         if possible_trip_ids_to_fix.contains(&trip.id) {
             let new_calendar = make_calendar_for_trip_short_name(
                 &trip.id,
