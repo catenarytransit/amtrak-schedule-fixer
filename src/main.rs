@@ -107,7 +107,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     // then it is flagged.
     // 
     // Flagged trips are send to possible_trip_ids_to_fix, except for Pacific Surfliner.
-    // All Pacific Surfliner trips, regardless of departure time, are sent to surfliner_services_to_cancel.
     // 
     // TODO: Do we need to deal with daylight savings time and weird timezones such as Arizona and Indiana?
     for (trip_id, trip) in gtfs_initial_read.trips.iter() {
@@ -160,14 +159,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 }
             }
 
-            if route.long_name.as_ref().unwrap() == "Pacific Surfliner" {
-                // println!("Surfliner {}", trip.trip_headsign.as_ref().unwrap());
-
-                // println!("{:?}", service);
-
-                surfliner_services_to_cancel.push(service.id.clone());
-            }
-
             calendar_id_to_route_ids
                 .entry(service.id.clone())
                 .and_modify(|x| {
@@ -176,9 +167,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 .or_insert(HashSet::from_iter(vec![route.id.clone()]));
         }
     }
-
-    surfliner_services_to_cancel.sort();
-    surfliner_services_to_cancel.dedup();
 
     // MARK - Rewrite trips.txt and calendar.txt
     let gtfs_raw = gtfs_structures::RawGtfs::from_path(&target_dir)?;
