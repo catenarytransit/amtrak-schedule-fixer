@@ -9,6 +9,7 @@ use std::io::Read;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
+use rgb::RGB8;
 
 mod routes_list;
 
@@ -17,6 +18,22 @@ const GTFS_URL: &str = "https://content.amtrak.com/content/gtfs/GTFS.zip";
 const DOWNLOAD_AND_UNZIP_INIT: bool = true;
 
 const TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES: [&str; 3] = ["2", "343", "422"];
+
+const ROUTE_IDS_TO_REMOVE: [&str; 3] = [
+    "42985", // MARC
+    // MARC is removed because the Maryland Transit Administration feed should be used instead
+    "84", // Capitol Corridor
+    // Capitol Corridor is removed because the 311.org GTFS feed should be used instead
+    "31849" // Maple Leaf (Via Rail)
+    // Maple Leaf is removed because route_id 68, which includes both the US and Canadian halves, should be used instead
+];
+
+const SLE_ID: &str = "42948";
+const SLE_NEW_SHORT_NAME: &str = "SLE";
+const SLE_NEW_LONG_NAME: &str = "Shore Line East";
+const SLE_NEW_COLOR: RGB8 = RGB8 {r: 0xEA, g: 0x0D, b:0x2A}; // EA0D2A
+
+const STOP_ID_TO_REMOVE: &str = "LBO";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
@@ -161,15 +178,21 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
-    // MARK - Rewrite trips.txt and calendar.txt
+    // MARK - Rewrite GTFS files
     let gtfs_raw = gtfs_structures::RawGtfs::from_path(&target_dir)?;
 
+    let mut route_wtr = csv::Writer::from_path("./amtrak-gtfs/routes.txt")?;
     let mut trip_wtr = csv::Writer::from_path("./amtrak-gtfs/trips.txt")?;
+    let mut stop_time_wtr = csv::Writer::from_path("./amtrak-gtfs/stop_times.txt")?;
+    let mut stop_wtr = csv::Writer::from_path("./amtrak-gtfs/stops.txt")?;
     let mut calendar_wtr = csv::Writer::from_path("./amtrak-gtfs/calendar.txt")?;
 
-    let mut calendars_to_write = gtfs_raw.calendar.unwrap().unwrap();
-
+    let mut routes_to_process = gtfs_raw.routes.unwrap();
     let trips_to_process = gtfs_raw.trips.unwrap();
+    let stop_times_to_process = gtfs_raw.stop_times.unwrap();
+    let mut stops_to_process = gtfs_raw.stops.unwrap();
+
+    let mut calendars_to_write = gtfs_raw.calendar.unwrap().unwrap();
 
     for trip in trips_to_process {
         let mut trip = trip;
@@ -204,6 +227,22 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
 
         trip_wtr.serialize(trip)?;
+    }
+
+    for mut route in routes_to_process {
+        // Drop routes to remove
+        if ROUTE_IDS_TO_REMOVE.contains(&route.id.as_str()) {
+            continue;
+        }
+
+        // Fix Shore Line East
+        if route.id.as_str() == SLE_ID {
+            route.short_name = Some(SLE_NEW_SHORT_NAME.to_string());
+            route.long_name = Some(SLE_NEW_LONG_NAME.to_string());
+            route.color = Some(SLE_NEW_COLOR);
+        }
+
+        route_wtr.serialize(route)?;
     }
 
     //write everything back to the files

@@ -38,6 +38,7 @@ dependencies = [
  "csv",
  "gtfs-structures",
  "reqwest",
+ "rgb",
  "serde",
  "serde_json",
  "tokio",
