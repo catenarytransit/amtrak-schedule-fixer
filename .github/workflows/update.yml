@@ -36,8 +36,23 @@ jobs:
 
        - name: Download osm files
          run: |
-          wget https://github.com/catenarytransit/osm-filter/releases/download/latest/railonly-north-america-latest.osm.pbf
-          wget https://github.com/catenarytransit/osm-filter/releases/download/latest/amtrak-thruway.osm.pbf
+           wget https://github.com/catenarytransit/osm-filter/releases/download/latest/railonly-north-america-latest.osm.pbf
+           
+           # Download chunk count
+           wget https://github.com/catenarytransit/osm-filter/releases/download/latest/pfaedle-filtered-us-latest-chunk-count.txt
+           count=$(cat pfaedle-filtered-us-latest-chunk-count.txt)
+           
+           # Download chunks
+           for ((i=0; i<count; i++)); do
+             printf -v padded_i "%02d" $i
+             wget "https://github.com/catenarytransit/osm-filter/releases/download/latest/pfaedle-filtered-us-latest-chunk-$padded_i"
+           done
+           
+           # Combine chunks
+           cat pfaedle-filtered-us-latest-chunk-* > pfaedle-filtered-us-latest.osm.pbf
+
+           # Delete chunks
+           rm pfaedle-filtered-us-latest-chunk-*
 
        - uses: actions-rust-lang/setup-rust-toolchain@v1
          with:
@@ -49,7 +64,7 @@ jobs:
        - name: Run Pfaedle
          run: |
             pfaedle -x railonly-north-america-latest.osm.pbf amtrak-gtfs -F --inplace --mots rail --write-colors
-            pfaedle -x amtrak-thruway.osm.pbf amtrak-gtfs -F --inplace --mots bus --write-colors
+            pfaedle -x pfaedle-filtered-us-latest.osm.pbf amtrak-gtfs -F --inplace --mots bus --write-colors
 
        - name: Rezip
          run: |
