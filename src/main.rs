@@ -16,22 +16,19 @@ const DOWNLOAD_AND_UNZIP_INIT: bool = true;
 
 const TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES: [&str; 3] = ["2", "343", "422"];
 
-const AGENCY_NAMES_TO_REMOVE: [&str; 2] = [
-    "MARC",
+const AGENCY_NAMES_TO_REMOVE: [&str; 3] = [
     // MARC is removed because the Maryland Transit Administration feed should be used instead
-    "Via Rail Canada"
+    "MARC",
     // Maple Leaf is removed because route_id 68, which includes both the US and Canadian halves, should be used instead
+    "Via Rail Canada",
+    // Shore Line East is removed because we are using the SLE schedules from PDF
+    "Shore Line East",
 ];
 
 const ROUTE_LONG_NAMES_TO_REMOVE: [&str; 1] = [
     "Capitol Corridor"
     // Capitol Corridor is removed because the 511.org GTFS feed should be used instead
 ];
-
-const SLE_AGENCY_NAME: &str = "Shore Line East";
-const SLE_NEW_SHORT_NAME: &str = "SLE";
-const SLE_NEW_LONG_NAME: &str = "Shore Line East";
-const SLE_NEW_COLOR: RGB8 = RGB8 {r: 0xEA, g: 0x0D, b:0x2A}; // EA0D2A
 
 const LBO_STOP_ID: &str = "LBO";
 const LBO_STOP_NAME: &str = "Los Baños Memorial Hospital";
@@ -187,9 +184,8 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         .filter_map(|a| a.id.clone())
         .collect();
 
-    // Identify routes to remove and SLE routes
+    // Identify routes to remove
     let mut route_ids_to_remove: HashSet<String> = HashSet::new();
-    let mut sle_route_ids: HashSet<String> = HashSet::new();
 
     for route in &routes {
         if let Some(agency_id) = route.agency_id.as_ref() {
@@ -197,14 +193,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             if remove_agency_ids.contains(agency_id) {
                 route_ids_to_remove.insert(route.id.clone());
                 continue;
-            }
-
-            // Identify SLE routes
-            if agency_id_to_name
-                .get(agency_id)
-                .is_some_and(|n| n.as_str() == SLE_AGENCY_NAME)
-            {
-                sle_route_ids.insert(route.id.clone());
             }
         }
 
@@ -263,16 +251,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             continue;
         }
 
-        // Remove SLE trips whose short name starts with '9'
-        // This is because these trips do not actually exist, according to the SLE PDF timetable
-        if sle_route_ids.contains(&trip.route_id) {
-            if let Some(trip_short_name) = trip.trip_short_name.as_deref() {
-                if trip_short_name.starts_with('9') {
-                    continue;
-                }
-            }
-        }
-
         kept_trip_ids.insert(trip.id.clone());
         trip_wtr.serialize(trip)?;
     }
@@ -318,13 +296,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         let mut route = route;
         if route_ids_to_remove.contains(&route.id) {
             continue;
-        }
-
-        // Fix SLE
-        if sle_route_ids.contains(&route.id) {
-            route.long_name = Some(SLE_NEW_LONG_NAME.to_string());
-            route.short_name = Some(SLE_NEW_SHORT_NAME.to_string());
-            route.color = Some(SLE_NEW_COLOR);
         }
 
         route_wtr.serialize(route)?;

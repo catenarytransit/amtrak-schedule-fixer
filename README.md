@@ -44,7 +44,6 @@ Flagged trips are only logged; nothing is done to them.
 
 ## TODO
 
-* [ ] We may want to completely remove Shore Line East and build our own timetable for it, due to the extremely bad data quality issues with it and its complex interaction with Metro-North.
 * [ ] We need to understand how the realtime data for Maple Leaf interacts with the GTFS timetable.
 
 ## Usage
