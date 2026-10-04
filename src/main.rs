@@ -8,7 +8,8 @@ use std::io::Read;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
-use rgb::RGB8;
+
+// MARK: - Constants
 
 const GTFS_URL: &str = "https://content.amtrak.com/content/gtfs/GTFS.zip";
 
@@ -39,6 +40,7 @@ const EWR_STOP_ID: &str = "EWR";
 const EWR_LAT: f64 = 40.704444;
 const EWR_LON: f64 = -74.190556;
 
+// MARK: - main()
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let client = reqwest::Client::new();
@@ -83,7 +85,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let stops = gtfs_raw.stops.unwrap();
     let mut calendars_to_write = gtfs_raw.calendar.unwrap().unwrap();
 
-    // MARK - Removal of broken shapes
+    // MARK: - Removal of broken shapes
     let mut route_ids_to_remove_shapes_from: HashSet<String> = HashSet::new();
 
     // TODO: Document why California Zephyr and Floridian are broken
@@ -117,7 +119,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
-    // MARK - Check trips for departure after midnight in non-Eastern timezones
+    // MARK: - Check trips for departure after midnight in non-Eastern timezones
     // 
     // If a trip departs at:
     // - 00:00~01:00 in Central Time
@@ -170,7 +172,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
-    // MARK - Remove problematic agencies and routes
+    // MARK: - Remove problematic agencies and routes
     let mut agency_id_to_name: HashMap<String, String> = HashMap::new();
     for agency in &agencies {
         if let Some(agency_id) = &agency.id {
@@ -204,7 +206,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
-    // MARK - Rewrite GTFS files
+    // MARK: - Rewrite GTFS files
     let mut agency_wtr = csv::Writer::from_path("./amtrak-gtfs/agency.txt")?;
     let mut route_wtr = csv::Writer::from_path("./amtrak-gtfs/routes.txt")?;
     let mut trip_wtr = csv::Writer::from_path("./amtrak-gtfs/trips.txt")?;
@@ -212,7 +214,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let mut stop_wtr = csv::Writer::from_path("./amtrak-gtfs/stops.txt")?;
     let mut calendar_wtr = csv::Writer::from_path("./amtrak-gtfs/calendar.txt")?;
 
-    // MARK - Process trips
+    // MARK: - Process trips
     let mut kept_trip_ids: HashSet<String> = HashSet::new();
     for trip in trips {
         let mut trip = trip;
@@ -256,6 +258,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     }
     trip_wtr.flush()?;
 
+    // MARK: - Process other stuff
     for agency in agencies {
         if agency.id.as_ref().is_some_and(|id| remove_agency_ids.contains(id)) {
             continue;
@@ -310,6 +313,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     Ok(())
 }
 
+// MARK: - make_calendar_for_trip_short_name()
 fn make_calendar_for_trip_short_name(
     trip_id: &str,
     trip_short_name: &str,
