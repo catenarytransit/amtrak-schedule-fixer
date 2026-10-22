@@ -8,7 +8,8 @@ use std::io::Read;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
-use rgb::RGB8;
+
+// MARK: - Constants
 
 const GTFS_URL: &str = "https://content.amtrak.com/content/gtfs/GTFS.zip";
 
@@ -16,22 +17,19 @@ const DOWNLOAD_AND_UNZIP_INIT: bool = true;
 
 const TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES: [&str; 3] = ["2", "343", "422"];
 
-const AGENCY_NAMES_TO_REMOVE: [&str; 2] = [
-    "MARC",
+const AGENCY_NAMES_TO_REMOVE: [&str; 3] = [
     // MARC is removed because the Maryland Transit Administration feed should be used instead
-    "Via Rail Canada"
+    "MARC",
     // Maple Leaf is removed because route_id 68, which includes both the US and Canadian halves, should be used instead
+    "Via Rail Canada",
+    // Shore Line East is removed because we are using the SLE schedules from PDF
+    "Shore Line East",
 ];
 
 const ROUTE_LONG_NAMES_TO_REMOVE: [&str; 1] = [
     "Capitol Corridor"
     // Capitol Corridor is removed because the 511.org GTFS feed should be used instead
 ];
-
-const SLE_AGENCY_NAME: &str = "Shore Line East";
-const SLE_NEW_SHORT_NAME: &str = "SLE";
-const SLE_NEW_LONG_NAME: &str = "Shore Line East";
-const SLE_NEW_COLOR: RGB8 = RGB8 {r: 0xEA, g: 0x0D, b:0x2A}; // EA0D2A
 
 const LBO_STOP_ID: &str = "LBO";
 const LBO_STOP_NAME: &str = "Los Baños Memorial Hospital";
@@ -42,6 +40,7 @@ const EWR_STOP_ID: &str = "EWR";
 const EWR_LAT: f64 = 40.704444;
 const EWR_LON: f64 = -74.190556;
 
+// MARK: - main()
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let client = reqwest::Client::new();
@@ -86,7 +85,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let stops = gtfs_raw.stops.unwrap();
     let mut calendars_to_write = gtfs_raw.calendar.unwrap().unwrap();
 
-    // MARK - Removal of broken shapes
+    // MARK: - Removal of broken shapes
     let mut route_ids_to_remove_shapes_from: HashSet<String> = HashSet::new();
 
     // TODO: Document why California Zephyr and Floridian are broken
@@ -120,7 +119,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
-    // MARK - Check trips for departure after midnight in non-Eastern timezones
+    // MARK: - Check trips for departure after midnight in non-Eastern timezones
     // 
     // If a trip departs at:
     // - 00:00~01:00 in Central Time
@@ -173,7 +172,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
-    // MARK - Remove problematic agencies and routes
+    // MARK: - Remove problematic agencies and routes
     let mut agency_id_to_name: HashMap<String, String> = HashMap::new();
     for agency in &agencies {
         if let Some(agency_id) = &agency.id {
@@ -187,9 +186,8 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         .filter_map(|a| a.id.clone())
         .collect();
 
-    // Identify routes to remove and SLE routes
+    // Identify routes to remove
     let mut route_ids_to_remove: HashSet<String> = HashSet::new();
-    let mut sle_route_ids: HashSet<String> = HashSet::new();
 
     for route in &routes {
         if let Some(agency_id) = route.agency_id.as_ref() {
@@ -197,14 +195,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             if remove_agency_ids.contains(agency_id) {
                 route_ids_to_remove.insert(route.id.clone());
                 continue;
-            }
-
-            // Identify SLE routes
-            if agency_id_to_name
-                .get(agency_id)
-                .is_some_and(|n| n.as_str() == SLE_AGENCY_NAME)
-            {
-                sle_route_ids.insert(route.id.clone());
             }
         }
 
@@ -216,7 +206,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
-    // MARK - Rewrite GTFS files
+    // MARK: - Rewrite GTFS files
     let mut agency_wtr = csv::Writer::from_path("./amtrak-gtfs/agency.txt")?;
     let mut route_wtr = csv::Writer::from_path("./amtrak-gtfs/routes.txt")?;
     let mut trip_wtr = csv::Writer::from_path("./amtrak-gtfs/trips.txt")?;
@@ -224,7 +214,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let mut stop_wtr = csv::Writer::from_path("./amtrak-gtfs/stops.txt")?;
     let mut calendar_wtr = csv::Writer::from_path("./amtrak-gtfs/calendar.txt")?;
 
-    // MARK - Process trips
+    // MARK: - Process trips
     let mut kept_trip_ids: HashSet<String> = HashSet::new();
     for trip in trips {
         let mut trip = trip;
@@ -263,21 +253,12 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             continue;
         }
 
-        // Remove SLE trips whose short name starts with '9'
-        // This is because these trips do not actually exist, according to the SLE PDF timetable
-        if sle_route_ids.contains(&trip.route_id) {
-            if let Some(trip_short_name) = trip.trip_short_name.as_deref() {
-                if trip_short_name.starts_with('9') {
-                    continue;
-                }
-            }
-        }
-
         kept_trip_ids.insert(trip.id.clone());
         trip_wtr.serialize(trip)?;
     }
     trip_wtr.flush()?;
 
+    // MARK: - Process other stuff
     for agency in agencies {
         if agency.id.as_ref().is_some_and(|id| remove_agency_ids.contains(id)) {
             continue;
@@ -320,13 +301,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             continue;
         }
 
-        // Fix SLE
-        if sle_route_ids.contains(&route.id) {
-            route.long_name = Some(SLE_NEW_LONG_NAME.to_string());
-            route.short_name = Some(SLE_NEW_SHORT_NAME.to_string());
-            route.color = Some(SLE_NEW_COLOR);
-        }
-
         route_wtr.serialize(route)?;
     }
     route_wtr.flush()?;
@@ -339,6 +313,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     Ok(())
 }
 
+// MARK: - make_calendar_for_trip_short_name()
 fn make_calendar_for_trip_short_name(
     trip_id: &str,
     trip_short_name: &str,
