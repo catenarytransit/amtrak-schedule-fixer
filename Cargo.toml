@@ -11,7 +11,6 @@ gtfs-structures = "0.45.1"
 reqwest = "0.12.23"
 rgb = "0.8.52"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
 tokio = { version = "1.47.1", features = ["full"] }
 zip = "2.2"
 zip-extract = "0.2.1"
