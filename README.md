@@ -79,3 +79,20 @@ The test is marked ignored for regular offline `cargo test` because it
 requires a freshly processed GTFS feed; the script explicitly includes it.
 The test intentionally fails if the published feed or corrected calendar does
 not contain the requested services, rather than synthesizing departures.
+
+### Sunset Limited service-calendar correction
+
+The corrected feed assigns train short name `2` its regular departure days
+of **Sunday, Wednesday, and Friday at 22:00 America/Los_Angeles**
+(corresponding to Monday, Thursday, and Saturday on Amtrak's Eastern
+GTFS service-date clock). Train short name `1` leaves
+**New Orleans on Monday, Wednesday, and Saturday at 09:00 America/Chicago**.
+
+The fixer creates separate calendar entries for these trips and adds
+`calendar_dates.txt` service additions for the November 14 and 16, 2026
+service dates to restore the missing trips shown around November 15–16.
+These additions are written for the replacement service IDs only; the
+source feed's unrelated calendar-date exceptions are preserved.
+
+The integration test checks all three weekday departure examples for each
+direction, in addition to train 1's 05:35 Los Angeles arrival on November 16.
