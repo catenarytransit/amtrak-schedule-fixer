@@ -15,7 +15,10 @@ const GTFS_URL: &str = "https://content.amtrak.com/content/gtfs/GTFS.zip";
 const DOWNLOAD_AND_UNZIP_INIT: bool = true;
 
 const TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES: [&str; 4] = ["1", "2", "343", "422"];
-const HISTORICAL_TRAINS: [&str; 7] = ["1", "2", "5", "6", "41", "4", "8"];
+// Keep the earliest published timetable variant active during the recent
+// history window. Backdate service availability, not stop_times; realtime
+// departure instants must still match the published timetable.
+const HISTORICAL_TRAINS: [&str; 9] = ["1", "2", "5", "6", "41", "4", "8", "42", "517"];
 const HISTORY_START: &str = "2026-10-17";
 
 const AGENCY_NAMES_TO_REMOVE: [&str; 3] = [

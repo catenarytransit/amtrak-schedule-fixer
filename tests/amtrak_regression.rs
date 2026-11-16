@@ -255,6 +255,11 @@ fn historical_long_distance_trips_have_coverage_without_variant_collisions()
         ("41", "20261114"),
         ("4", "20261114"),
         ("8", "20261114"),
+        // Pennsylvanian 42 previously started on November 17 in the
+        // published feed, leaving its November 16 service unrepresented.
+        ("42", "20261116"),
+        // Cascades 517 has a winter variant starting November 15.
+        ("517", "20261116"),
     ] {
         let day_date = jiff::civil::Date::strptime("%Y%m%d", day)?;
         let weekday = match day_date.weekday() {
@@ -294,7 +299,7 @@ fn historical_long_distance_trips_have_coverage_without_variant_collisions()
         for trip in trips.iter().filter(|t| {
             matches!(
                 t.trip_short_name.as_deref(),
-                Some("1" | "2" | "5" | "6" | "41" | "4" | "8")
+                Some("1" | "2" | "5" | "6" | "41" | "4" | "8" | "42" | "517")
             )
         }) {
             if active_on(
