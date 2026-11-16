@@ -7,7 +7,6 @@ use std::io::Cursor;
 use std::io::Read;
 use std::io::Write;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 // MARK: - Constants
 
@@ -148,14 +147,14 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
             let initial_timezone_str = first_stop_time.stop.as_ref().timezone.as_ref().unwrap();
 
-            let initial_timezone = chrono_tz::Tz::from_str(initial_timezone_str).unwrap();
+            let initial_timezone = jiff::tz::TimeZone::get(initial_timezone_str)?;
 
-            if initial_timezone != chrono_tz::Tz::America__New_York {
-                let soonest_hr_to_break = match initial_timezone {
-                    chrono_tz::Tz::America__Chicago => 1,
-                    chrono_tz::Tz::America__Denver => 2,
-                    chrono_tz::Tz::America__Los_Angeles => 3,
-                    _ => unreachable!(),
+            if initial_timezone_str != "America/New_York" {
+                let soonest_hr_to_break = match initial_timezone_str.as_str() {
+                    "America/Chicago" => 1,
+                    "America/Denver" => 2,
+                    "America/Los_Angeles" => 3,
+                    _ => continue, // Do not panic on other valid IANA time zones.
                 };
 
                 if departure_from_midnight <= (soonest_hr_to_break * 3600) {
