@@ -53,3 +53,46 @@ cargo run
 ```
 
 Note that additional steps, such as running `pfaedle`, are recommended. See `.github/workflows/update.yml` for details. Pfaedle 
+
+## Reproducible regression tests (without pfaedle)
+
+Run `bash scripts/test-amtrak-no-pfaedle.sh` from any directory. The script runs
+the fixer, which downloads the live official GTFS feed, applies corrections,
+then runs the integration test and produces `amtrak-gtfs-tested-no-pfaedle.zip`.
+No pfaedle installation or OSM download is necessary.
+
+The GitHub Actions workflow `.github/workflows/test-without-pfaedle.yml`
+runs on pull requests, pushes to main, manual dispatch, and reusable workflow
+calls. It uploads the processed feed as a short-lived artifact.
+
+### November 15–16, 2026 Los Angeles test
+
+The integration test checks that the *processed* feed has active trips with:
+- Train short name `2`, departing stop `LAX` at **22:00 PST on Sunday, November 15, 2026**.
+- Train short name `1`, arriving at stop `LAX` at **05:35 PST on Monday, November 16, 2026**.
+
+It interprets GTFS stop times relative to the Amtrak agency time zone
+(`America/New_York`), checks calendar validity and `calendar_dates.txt`
+exceptions, supports hour values over 24, and compares actual instants after
+time-zone conversion using Jiff and its bundled IANA time-zone database.
+The test is marked ignored for regular offline `cargo test` because it
+requires a freshly processed GTFS feed; the script explicitly includes it.
+The test intentionally fails if the published feed or corrected calendar does
+not contain the requested services, rather than synthesizing departures.
+
+### Sunset Limited service-calendar correction
+
+The corrected feed assigns train short name `2` its regular departure days
+of **Sunday, Wednesday, and Friday at 22:00 America/Los_Angeles**
+(corresponding to Monday, Thursday, and Saturday on Amtrak's Eastern
+GTFS service-date clock). Train short name `1` leaves
+**New Orleans on Monday, Wednesday, and Saturday at 09:00 America/Chicago**.
+
+The fixer creates separate calendar entries for these trips and adds
+`calendar_dates.txt` service additions for the November 14 and 16, 2026
+service dates to restore the missing trips shown around November 15–16.
+These additions are written for the replacement service IDs only; the
+source feed's unrelated calendar-date exceptions are preserved.
+
+The integration test checks all three weekday departure examples for each
+direction, in addition to train 1's 05:35 Los Angeles arrival on November 16.

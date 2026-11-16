@@ -7,7 +7,6 @@ use std::io::Cursor;
 use std::io::Read;
 use std::io::Write;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 // MARK: - Constants
 
@@ -15,7 +14,7 @@ const GTFS_URL: &str = "https://content.amtrak.com/content/gtfs/GTFS.zip";
 
 const DOWNLOAD_AND_UNZIP_INIT: bool = true;
 
-const TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES: [&str; 3] = ["2", "343", "422"];
+const TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES: [&str; 4] = ["1", "2", "343", "422"];
 
 const AGENCY_NAMES_TO_REMOVE: [&str; 3] = [
     // MARC is removed because the Maryland Transit Administration feed should be used instead
@@ -148,14 +147,14 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
             let initial_timezone_str = first_stop_time.stop.as_ref().timezone.as_ref().unwrap();
 
-            let initial_timezone = chrono_tz::Tz::from_str(initial_timezone_str).unwrap();
+            jiff::tz::TimeZone::get(initial_timezone_str)?;
 
-            if initial_timezone != chrono_tz::Tz::America__New_York {
-                let soonest_hr_to_break = match initial_timezone {
-                    chrono_tz::Tz::America__Chicago => 1,
-                    chrono_tz::Tz::America__Denver => 2,
-                    chrono_tz::Tz::America__Los_Angeles => 3,
-                    _ => unreachable!(),
+            if initial_timezone_str != "America/New_York" {
+                let soonest_hr_to_break = match initial_timezone_str.as_str() {
+                    "America/Chicago" => 1,
+                    "America/Denver" => 2,
+                    "America/Los_Angeles" => 3,
+                    _ => continue, // Do not panic on other valid IANA time zones.
                 };
 
                 if departure_from_midnight <= (soonest_hr_to_break * 3600) {
@@ -214,6 +213,16 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let mut stop_wtr = csv::Writer::from_path("./amtrak-gtfs/stops.txt")?;
     let mut calendar_wtr = csv::Writer::from_path("./amtrak-gtfs/calendar.txt")?;
 
+    // Date-specific restorations for the Sunset Limited. Amtrak's GTFS times
+    // use Eastern agency time: a Sunday 22:00 departure in Los Angeles
+    // belongs to Monday's GTFS service day. Train 1 leaves New Orleans on
+    // Monday, Wednesday and Saturday at 09:00 Central.
+    //
+    // These exceptions restore dates even if the source calendar's validity
+    // starts later. They are assigned only to the new per-trip service IDs,
+    // leaving all unrelated services untouched.
+    let mut sunset_service_additions: Vec<(String, &'static str)> = Vec::new();
+
     // MARK: - Process trips
     let mut kept_trip_ids: HashSet<String> = HashSet::new();
     for trip in trips {
@@ -243,6 +252,21 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
             if let Some(new_calendar) = new_calendar {
                 trip.service_id = new_calendar.id.clone();
+
+                match trip_short_name.as_str() {
+                    "1" => {
+                        // Sat 14 November departs New Orleans and arrives in
+                        // Los Angeles early Monday 16 November.
+                        sunset_service_additions.push((new_calendar.id.clone(), "20261114"));
+                        // Monday's departure should remain available, too.
+                        sunset_service_additions.push((new_calendar.id.clone(), "20261116"));
+                    }
+                    "2" => {
+                        // Sun 15 November at 22:00 PST = Mon 16 November 06:00 EST.
+                        sunset_service_additions.push((new_calendar.id.clone(), "20261116"));
+                    }
+                    _ => {}
+                }
 
                 calendars_to_write.push(new_calendar);
             }
@@ -296,7 +320,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     stop_time_wtr.flush()?;
 
     for route in routes {
-        let mut route = route;
         if route_ids_to_remove.contains(&route.id) {
             continue;
         }
@@ -310,6 +333,28 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     }
     calendar_wtr.flush()?;
 
+    // calendar_dates.txt is left in place by the fixer. Append overrides
+    // for the generated service IDs instead of modifying the original feed's
+    // exception entries or creating duplicate GTFS trip records.
+    if !sunset_service_additions.is_empty() {
+        let dates_path = target_dir.join("calendar_dates.txt");
+        let needs_header = !dates_path.exists() || std::fs::metadata(&dates_path)?.len() == 0;
+        let output = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&dates_path)?;
+        let mut dates_wtr = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(output);
+        if needs_header {
+            dates_wtr.write_record(["service_id", "date", "exception_type"])?;
+        }
+        for (service_id, date) in sunset_service_additions {
+            dates_wtr.write_record([service_id.as_str(), date, "1"])?;
+        }
+        dates_wtr.flush()?;
+    }
+
     Ok(())
 }
 
@@ -322,6 +367,18 @@ fn make_calendar_for_trip_short_name(
     let id = format!("catenary-{}-{}", trip_short_name, trip_id);
 
     match trip_short_name {
+        "1" => Some(gtfs_structures::Calendar {
+            id,
+            monday: true,
+            tuesday: false,
+            wednesday: true,
+            thursday: false,
+            friday: false,
+            saturday: true,
+            sunday: false,
+            start_date: calendar.start_date,
+            end_date: calendar.end_date,
+        }),
         "2" => Some(gtfs_structures::Calendar {
             id,
             monday: true,

@@ -1,0 +1,34 @@
+name: Download and test Amtrak GTFS (no pfaedle)
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  download-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+      - name: Install ZIP utility
+        run: sudo apt-get update && sudo apt-get install -y zip
+      - name: Download, fix and validate feed (without pfaedle)
+        run: bash scripts/test-amtrak-no-pfaedle.sh
+      - name: Upload tested feed
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: amtrak-gtfs-tested-no-pfaedle
+          path: |
+            amtrak-gtfs-tested-no-pfaedle.zip
+            amtrak-gtfs.zip
+          if-no-files-found: ignore
+          retention-days: 7
