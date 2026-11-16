@@ -359,7 +359,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         println!("Extended {route} train {train} ({origin}) via {selected_id} back to {HISTORY_START}");
     }
     let mut calendar_wtr = csv::Writer::from_path("./amtrak-gtfs/calendar.txt")?;
-    let mut calendar_wtr = csv::Writer::from_path("./amtrak-gtfs/calendar.txt")?;
     for calendar in calendars_to_write { calendar_wtr.serialize(calendar)?; }
     calendar_wtr.flush()?;
 
