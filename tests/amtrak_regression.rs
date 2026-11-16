@@ -87,7 +87,17 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
 
     let la = TimeZone::get("America/Los_Angeles")?;
     let eastern = TimeZone::get("America/New_York")?;
-    let desired_departure = date(2026, 11, 15).at(22, 0, 0, 0).to_zoned(la.clone())?;
+    let desired_departures = [
+        date(2026, 11, 15).at(22, 0, 0, 0).to_zoned(la.clone())?,
+        date(2026, 11, 18).at(22, 0, 0, 0).to_zoned(la.clone())?,
+        date(2026, 11, 20).at(22, 0, 0, 0).to_zoned(la.clone())?,
+    ];
+    let central = TimeZone::get("America/Chicago")?;
+    let desired_new_orleans_departures = [
+        date(2026, 11, 16).at(9, 0, 0, 0).to_zoned(central.clone())?,
+        date(2026, 11, 18).at(9, 0, 0, 0).to_zoned(central.clone())?,
+        date(2026, 11, 21).at(9, 0, 0, 0).to_zoned(central.clone())?,
+    ];
     let desired_arrival = date(2026, 11, 16).at(5, 35, 0, 0).to_zoned(la.clone())?;
 
     // Amtrak's published GTFS times are in its agency timezone (Eastern),
@@ -97,28 +107,47 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
         (date(2026, 11, 14), "20261114", 5usize),
         (date(2026, 11, 15), "20261115", 6usize),
         (date(2026, 11, 16), "20261116", 0usize),
+        (date(2026, 11, 17), "20261117", 1usize),
+        (date(2026, 11, 18), "20261118", 2usize),
+        (date(2026, 11, 19), "20261119", 3usize),
+        (date(2026, 11, 20), "20261120", 4usize),
+        (date(2026, 11, 21), "20261121", 5usize),
+        (date(2026, 11, 22), "20261122", 6usize),
     ];
     let by_trip: HashMap<_, _> = trips.iter().map(|t| (t.trip_id.as_str(), t)).collect();
-    let mut found_departure = HashSet::new();
+    let mut found_departure = [false; 3];
+    let mut found_new_orleans_departure = [false; 3];
     let mut found_arrival = HashSet::new();
 
     for st in &stop_times {
-        if st.stop_id != "LAX" { continue; }
+        if st.stop_id != "LAX" && st.stop_id != "NOL" { continue; }
         let Some(trip) = by_trip.get(st.trip_id.as_str()) else { continue; };
         if trip.trip_short_name.as_deref() != Some("1")
             && trip.trip_short_name.as_deref() != Some("2") { continue; }
         for (day, ymd, weekday) in candidate_days {
             if !active_on(&trip.service_id, ymd, weekday, &calendars, &exceptions) { continue; }
             let origin = day.at(0, 0, 0, 0).to_zoned(eastern.clone())?;
-            if trip.trip_short_name.as_deref() == Some("2") {
+            if st.stop_id == "NOL" && trip.trip_short_name.as_deref() == Some("1") {
                 if let Some(seconds) = st.departure_time.as_deref().and_then(seconds_from_gtfs) {
                     let instant = origin.checked_add(SignedDuration::from_secs(seconds))?;
-                    if instant.timestamp() == desired_departure.timestamp() {
-                        found_departure.insert(trip.trip_id.as_str());
+                    for (index, expected) in desired_new_orleans_departures.iter().enumerate() {
+                        if instant.timestamp() == expected.timestamp() {
+                            found_new_orleans_departure[index] = true;
+                        }
                     }
                 }
             }
-            if trip.trip_short_name.as_deref() == Some("1") {
+            if st.stop_id == "LAX" && trip.trip_short_name.as_deref() == Some("2") {
+                if let Some(seconds) = st.departure_time.as_deref().and_then(seconds_from_gtfs) {
+                    let instant = origin.checked_add(SignedDuration::from_secs(seconds))?;
+                    for (index, expected) in desired_departures.iter().enumerate() {
+                        if instant.timestamp() == expected.timestamp() {
+                            found_departure[index] = true;
+                        }
+                    }
+                }
+            }
+            if st.stop_id == "LAX" && trip.trip_short_name.as_deref() == Some("1") {
                 if let Some(seconds) = st.arrival_time.as_deref().and_then(seconds_from_gtfs) {
                     let instant = origin.checked_add(SignedDuration::from_secs(seconds))?;
                     if instant.timestamp() == desired_arrival.timestamp() {
@@ -128,8 +157,14 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
             }
         }
     }
-    assert!(!found_departure.is_empty(),
-        "No active train 2 departure from LAX at 22:00 America/Los_Angeles on 2026-11-15");
+    for (index, found) in found_departure.iter().enumerate() {
+        assert!(*found, "Missing Sunset Limited 2 LAX departure at {}",
+            desired_departures[index]);
+    }
+    for (index, found) in found_new_orleans_departure.iter().enumerate() {
+        assert!(*found, "Missing Sunset Limited 1 NOL departure at {}",
+            desired_new_orleans_departures[index]);
+    }
     assert!(!found_arrival.is_empty(),
         "No active train 1 arrival at LAX at 05:35 America/Los_Angeles on 2026-11-16");
     Ok(())
