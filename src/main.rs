@@ -147,7 +147,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
             let initial_timezone_str = first_stop_time.stop.as_ref().timezone.as_ref().unwrap();
 
-            let initial_timezone = jiff::tz::TimeZone::get(initial_timezone_str)?;
+            jiff::tz::TimeZone::get(initial_timezone_str)?;
 
             if initial_timezone_str != "America/New_York" {
                 let soonest_hr_to_break = match initial_timezone_str.as_str() {
@@ -295,7 +295,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     stop_time_wtr.flush()?;
 
     for route in routes {
-        let mut route = route;
         if route_ids_to_remove.contains(&route.id) {
             continue;
         }
