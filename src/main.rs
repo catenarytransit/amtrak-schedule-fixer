@@ -249,6 +249,19 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         } else if HISTORICAL_TRAINS.contains(&short_name) {
             let mut private = calendar.clone();
             private.id = format!("catenary-history-{}", trip.id);
+            // The earliest Pennsylvanian 42 timetable variant is marked
+            // Tuesday-only in Amtrak GTFS despite the daily service. Keep
+            // this correction scoped to train 42; the normal variant switch
+            // still ends the old calendar when the new variant starts.
+            if short_name == "42" {
+                private.monday = true;
+                private.tuesday = true;
+                private.wednesday = true;
+                private.thursday = true;
+                private.friday = true;
+                private.saturday = true;
+                private.sunday = true;
+            }
             Some(private)
         } else {
             None
