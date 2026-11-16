@@ -1,9 +1,13 @@
 //! Live-feed regression checks. Run with scripts/test-amtrak-no-pfaedle.sh.
 //! The executable first writes the corrected GTFS feed to ./amtrak-gtfs.
 
-use jiff::{civil::date, tz::TimeZone, SignedDuration};
+use jiff::{SignedDuration, civil::date, tz::TimeZone};
 use serde::Deserialize;
-use std::{collections::{HashMap, HashSet}, error::Error, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    path::Path,
+};
 
 #[derive(Deserialize)]
 struct Trip {
@@ -65,11 +69,22 @@ fn active_on(
     if let Some(&kind) = exceptions.get(&(service.to_owned(), ymd.to_owned())) {
         return kind == 1;
     }
-    let Some(c) = calendars.get(service) else { return false; };
+    let Some(c) = calendars.get(service) else {
+        return false;
+    };
     if ymd < c.start_date.as_str() || ymd > c.end_date.as_str() {
         return false;
     }
-    [c.monday, c.tuesday, c.wednesday, c.thursday, c.friday, c.saturday, c.sunday][weekday] == 1
+    [
+        c.monday,
+        c.tuesday,
+        c.wednesday,
+        c.thursday,
+        c.friday,
+        c.saturday,
+        c.sunday,
+    ][weekday]
+        == 1
 }
 
 #[test]
@@ -79,12 +94,18 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
     let trips: Vec<Trip> = csv_rows(&root.join("trips.txt"))?;
     let stop_times: Vec<StopTime> = csv_rows(&root.join("stop_times.txt"))?;
     let calendars: HashMap<_, _> = csv_rows::<Calendar>(&root.join("calendar.txt"))?
-        .into_iter().map(|c| (c.service_id.clone(), c)).collect();
+        .into_iter()
+        .map(|c| (c.service_id.clone(), c))
+        .collect();
     let exception_file = root.join("calendar_dates.txt");
     let exceptions: HashMap<_, _> = if exception_file.exists() {
-        csv_rows::<CalendarDate>(&exception_file)?.into_iter()
-            .map(|d| ((d.service_id, d.date), d.exception_type)).collect()
-    } else { HashMap::new() };
+        csv_rows::<CalendarDate>(&exception_file)?
+            .into_iter()
+            .map(|d| ((d.service_id, d.date), d.exception_type))
+            .collect()
+    } else {
+        HashMap::new()
+    };
 
     let la = TimeZone::get("America/Los_Angeles")?;
     let eastern = TimeZone::get("America/New_York")?;
@@ -95,9 +116,15 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
     ];
     let central = TimeZone::get("America/Chicago")?;
     let desired_new_orleans_departures = [
-        date(2026, 11, 16).at(9, 0, 0, 0).to_zoned(central.clone())?,
-        date(2026, 11, 18).at(9, 0, 0, 0).to_zoned(central.clone())?,
-        date(2026, 11, 21).at(9, 0, 0, 0).to_zoned(central.clone())?,
+        date(2026, 11, 16)
+            .at(9, 0, 0, 0)
+            .to_zoned(central.clone())?,
+        date(2026, 11, 18)
+            .at(9, 0, 0, 0)
+            .to_zoned(central.clone())?,
+        date(2026, 11, 21)
+            .at(9, 0, 0, 0)
+            .to_zoned(central.clone())?,
     ];
     let desired_arrival = date(2026, 11, 16).at(5, 35, 0, 0).to_zoned(la.clone())?;
 
@@ -121,12 +148,21 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
     let mut found_arrival = HashSet::new();
 
     for st in &stop_times {
-        if st.stop_id != "LAX" && st.stop_id != "NOL" { continue; }
-        let Some(trip) = by_trip.get(st.trip_id.as_str()) else { continue; };
+        if st.stop_id != "LAX" && st.stop_id != "NOL" {
+            continue;
+        }
+        let Some(trip) = by_trip.get(st.trip_id.as_str()) else {
+            continue;
+        };
         if trip.trip_short_name.as_deref() != Some("1")
-            && trip.trip_short_name.as_deref() != Some("2") { continue; }
+            && trip.trip_short_name.as_deref() != Some("2")
+        {
+            continue;
+        }
         for (day, ymd, weekday) in candidate_days {
-            if !active_on(&trip.service_id, ymd, weekday, &calendars, &exceptions) { continue; }
+            if !active_on(&trip.service_id, ymd, weekday, &calendars, &exceptions) {
+                continue;
+            }
             let origin = day.at(0, 0, 0, 0).to_zoned(eastern.clone())?;
             if st.stop_id == "NOL" && trip.trip_short_name.as_deref() == Some("1") {
                 if let Some(seconds) = st.departure_time.as_deref().and_then(seconds_from_gtfs) {
@@ -159,15 +195,23 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
         }
     }
     for (index, found) in found_departure.iter().enumerate() {
-        assert!(*found, "Missing Sunset Limited 2 LAX departure at {}",
-            desired_departures[index]);
+        assert!(
+            *found,
+            "Missing Sunset Limited 2 LAX departure at {}",
+            desired_departures[index]
+        );
     }
     for (index, found) in found_new_orleans_departure.iter().enumerate() {
-        assert!(*found, "Missing Sunset Limited 1 NOL departure at {}",
-            desired_new_orleans_departures[index]);
+        assert!(
+            *found,
+            "Missing Sunset Limited 1 NOL departure at {}",
+            desired_new_orleans_departures[index]
+        );
     }
-    assert!(!found_arrival.is_empty(),
-        "No active train 1 arrival at LAX at 05:35 America/Los_Angeles on 2026-11-16");
+    assert!(
+        !found_arrival.is_empty(),
+        "No active train 1 arrival at LAX at 05:35 America/Los_Angeles on 2026-11-16"
+    );
     Ok(())
 }
 
@@ -181,16 +225,23 @@ fn gtfs_times_allow_service_day_overflow() {
 
 #[test]
 #[ignore = "requires processed Amtrak GTFS; run scripts/test-amtrak-no-pfaedle.sh"]
-fn historical_long_distance_trips_have_coverage_without_variant_collisions() -> Result<(), Box<dyn Error>> {
+fn historical_long_distance_trips_have_coverage_without_variant_collisions()
+-> Result<(), Box<dyn Error>> {
     let root = Path::new("amtrak-gtfs");
     let trips: Vec<Trip> = csv_rows(&root.join("trips.txt"))?;
     let times: Vec<StopTime> = csv_rows(&root.join("stop_times.txt"))?;
     let calendars: HashMap<_, _> = csv_rows::<Calendar>(&root.join("calendar.txt"))?
-        .into_iter().map(|c| (c.service_id.clone(), c)).collect();
+        .into_iter()
+        .map(|c| (c.service_id.clone(), c))
+        .collect();
     let exceptions: HashMap<_, _> = if root.join("calendar_dates.txt").exists() {
         csv_rows::<CalendarDate>(&root.join("calendar_dates.txt"))?
-            .into_iter().map(|d| ((d.service_id, d.date), d.exception_type)).collect()
-    } else { HashMap::new() };
+            .into_iter()
+            .map(|d| ((d.service_id, d.date), d.exception_type))
+            .collect()
+    } else {
+        HashMap::new()
+    };
     let mut origins = HashMap::<String, String>::new();
     for stop in times {
         origins.entry(stop.trip_id).or_insert(stop.stop_id);
@@ -215,10 +266,15 @@ fn historical_long_distance_trips_have_coverage_without_variant_collisions() -> 
             jiff::civil::Weekday::Saturday => 5,
             jiff::civil::Weekday::Sunday => 6,
         };
-        let active = trips.iter().filter(|t| t.trip_short_name.as_deref() == Some(number))
+        let active = trips
+            .iter()
+            .filter(|t| t.trip_short_name.as_deref() == Some(number))
             .filter(|t| active_on(&t.service_id, day, weekday, &calendars, &exceptions))
             .count();
-        assert!(active > 0, "No active historical service for train {number} on {day}");
+        assert!(
+            active > 0,
+            "No active historical service for train {number} on {day}"
+        );
     }
     // Across the entire required 30-day history window, the same train,
     // route and origin must not run twice because of backfilled variants.
@@ -235,16 +291,28 @@ fn historical_long_distance_trips_have_coverage_without_variant_collisions() -> 
             jiff::civil::Weekday::Sunday => 6,
         };
         let mut active = HashSet::new();
-        for trip in trips.iter().filter(|t| matches!(
-            t.trip_short_name.as_deref(), Some("1" | "2" | "5" | "6" | "41" | "4" | "8")
-        )) {
-            if active_on(&trip.service_id, &day_string, weekday, &calendars, &exceptions) {
+        for trip in trips.iter().filter(|t| {
+            matches!(
+                t.trip_short_name.as_deref(),
+                Some("1" | "2" | "5" | "6" | "41" | "4" | "8")
+            )
+        }) {
+            if active_on(
+                &trip.service_id,
+                &day_string,
+                weekday,
+                &calendars,
+                &exceptions,
+            ) {
                 let key = (
                     trip.route_id.clone(),
                     trip.trip_short_name.clone(),
                     origins.get(&trip.trip_id).cloned(),
                 );
-                assert!(active.insert(key.clone()), "Duplicate active train variant on {day_string}: {key:?}");
+                assert!(
+                    active.insert(key.clone()),
+                    "Duplicate active train variant on {day_string}: {key:?}"
+                );
             }
         }
     }

@@ -28,8 +28,7 @@ const AGENCY_NAMES_TO_REMOVE: [&str; 3] = [
 ];
 
 const ROUTE_LONG_NAMES_TO_REMOVE: [&str; 1] = [
-    "Capitol Corridor"
-    // Capitol Corridor is removed because the 511.org GTFS feed should be used instead
+    "Capitol Corridor", // Capitol Corridor is removed because the 511.org GTFS feed should be used instead
 ];
 
 const LBO_STOP_ID: &str = "LBO";
@@ -85,6 +84,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let stop_times = gtfs_raw.stop_times.unwrap();
     let stops = gtfs_raw.stops.unwrap();
     let mut calendars_to_write = gtfs_raw.calendar.unwrap().unwrap();
+    let mut feed_info = gtfs_raw.feed_info.unwrap().unwrap();
 
     // MARK: - Removal of broken shapes
     let mut route_ids_to_remove_shapes_from: HashSet<String> = HashSet::new();
@@ -121,14 +121,14 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     }
 
     // MARK: - Check trips for departure after midnight in non-Eastern timezones
-    // 
+    //
     // If a trip departs at:
     // - 00:00~01:00 in Central Time
     // - 00:00~02:00 in Mountain Time
     // - 00:00~03:00 in Pacific Time
     // then it is flagged.
     // Flagged trips are only logged; nothing is done to them.
-    // 
+    //
     // TODO: Do we need to deal with daylight savings time and weird timezones such as Arizona and Indiana?
     for (_, trip) in gtfs_initial_read.trips.iter() {
         if gtfs_initial_read
@@ -237,7 +237,9 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         // Apply calendar
         let calendar = gtfs_initial_read.calendar.get(&trip.service_id).unwrap();
 
-        if route_ids_to_remove.contains(&trip.route_id) { continue; }
+        if route_ids_to_remove.contains(&trip.route_id) {
+            continue;
+        }
         let short_name = trip.trip_short_name.as_deref().unwrap_or("");
         let corrected_calendar = if TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES.contains(&short_name) {
             make_calendar_for_trip_short_name(&trip.id, short_name, calendar.clone())
@@ -245,7 +247,9 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             let mut private = calendar.clone();
             private.id = format!("catenary-history-{}", trip.id);
             Some(private)
-        } else { None };
+        } else {
+            None
+        };
         if let Some(new_calendar) = corrected_calendar {
             let original_service = trip.service_id.clone();
             trip.service_id = new_calendar.id.clone();
@@ -253,15 +257,21 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 if let Some(original_trip) = gtfs_initial_read.trips.get(&trip.id) {
                     if let Some(first) = original_trip.stop_times.first() {
                         history_variants.push((
-                            trip.route_id.clone(), short_name.to_string(),
-                            first.stop.id.clone(), new_calendar.id.clone(),
+                            trip.route_id.clone(),
+                            short_name.to_string(),
+                            first.stop.id.clone(),
+                            new_calendar.id.clone(),
                         ));
                     }
                 }
             }
             if let Some(exceptions) = gtfs_initial_read.calendar_dates.get(&original_service) {
                 for entry in exceptions {
-                    let kind = if entry.exception_type == gtfs_structures::Exception::Added { "1" } else { "2" };
+                    let kind = if entry.exception_type == gtfs_structures::Exception::Added {
+                        "1"
+                    } else {
+                        "2"
+                    };
                     cloned_exceptions.push((
                         new_calendar.id.clone(),
                         entry.date.to_string().replace("-", ""),
@@ -284,7 +294,11 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     // MARK: - Process other stuff
     for agency in agencies {
-        if agency.id.as_ref().is_some_and(|id| remove_agency_ids.contains(id)) {
+        if agency
+            .id
+            .as_ref()
+            .is_some_and(|id| remove_agency_ids.contains(id))
+        {
             continue;
         }
         agency_wtr.serialize(agency)?;
@@ -333,20 +347,29 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let history_start = HISTORY_START.parse::<jiff::civil::Date>()?;
     let mut groups: HashMap<(String, String, String), Vec<String>> = HashMap::new();
     for (route, train, origin, service_id) in history_variants {
-        groups.entry((route, train, origin)).or_default().push(service_id);
+        groups
+            .entry((route, train, origin))
+            .or_default()
+            .push(service_id);
     }
     for ((route, train, origin), ids) in groups {
-        let mut variants: Vec<_> = calendars_to_write.iter().enumerate()
+        let mut variants: Vec<_> = calendars_to_write
+            .iter()
+            .enumerate()
             .filter(|(_, cal)| ids.contains(&cal.id))
             .map(|(index, cal)| (index, cal.start_date))
             .collect();
         variants.sort_by_key(|(_, date)| *date);
-        let Some(&(index, earliest)) = variants.first() else { continue };
+        let Some(&(index, earliest)) = variants.first() else {
+            continue;
+        };
         if variants.get(1).is_some_and(|(_, next)| *next == earliest) {
             println!("Ambiguous history for {route} train {train}, origin {origin}; skipping");
             continue;
         }
-        if earliest.to_string().as_str() <= HISTORY_START { continue; }
+        if earliest.to_string().as_str() <= HISTORY_START {
+            continue;
+        }
         let first_date = earliest.to_string().replace("-", "");
         let selected_id = calendars_to_write[index].id.clone();
         if cloned_exceptions.iter().any(|(id, date, _)| {
@@ -356,19 +379,30 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             continue;
         }
         calendars_to_write[index].start_date = history_start.to_string().parse()?;
-        println!("Extended {route} train {train} ({origin}) via {selected_id} back to {HISTORY_START}");
+        println!(
+            "Extended {route} train {train} ({origin}) via {selected_id} back to {HISTORY_START}"
+        );
     }
     let mut calendar_wtr = csv::Writer::from_path("./amtrak-gtfs/calendar.txt")?;
-    for calendar in calendars_to_write { calendar_wtr.serialize(calendar)?; }
+    for calendar in calendars_to_write {
+        calendar_wtr.serialize(calendar)?;
+    }
     calendar_wtr.flush()?;
 
     // Preserve original exceptions and copy them to the new private IDs.
     if !cloned_exceptions.is_empty() {
         let dates_path = target_dir.join("calendar_dates.txt");
         let needs_header = !dates_path.exists() || std::fs::metadata(&dates_path)?.len() == 0;
-        let output = std::fs::OpenOptions::new().append(true).create(true).open(&dates_path)?;
-        let mut writer = csv::WriterBuilder::new().has_headers(false).from_writer(output);
-        if needs_header { writer.write_record(["service_id", "date", "exception_type"])?; }
+        let output = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&dates_path)?;
+        let mut writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(output);
+        if needs_header {
+            writer.write_record(["service_id", "date", "exception_type"])?;
+        }
         let mut seen = HashSet::new();
         for (id, date, kind) in cloned_exceptions {
             if seen.insert((id.clone(), date.clone())) {
@@ -376,6 +410,36 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             }
         }
         writer.flush()?;
+    }
+
+    let feed_info_path = target_dir.join("feed_info.txt");
+    if feed_info_path.exists() {
+        let mut rdr = csv::Reader::from_path(&feed_info_path)?;
+        let headers = rdr.headers()?.clone();
+        let start_idx = headers.iter().position(|h| h == "feed_start_date");
+        let history_start_gtfs = HISTORY_START.replace("-", "");
+
+        let mut records: Vec<csv::StringRecord> = Vec::new();
+        for result in rdr.records() {
+            let mut record = result?;
+            if let Some(idx) = start_idx {
+                if let Some(current_start) = record.get(idx) {
+                    if current_start.is_empty() || current_start > history_start_gtfs.as_str() {
+                        let mut updated: Vec<String> = record.iter().map(String::from).collect();
+                        updated[idx] = history_start_gtfs.clone();
+                        record = csv::StringRecord::from(updated);
+                    }
+                }
+            }
+            records.push(record);
+        }
+
+        let mut wtr = csv::Writer::from_path(&feed_info_path)?;
+        wtr.write_record(&headers)?;
+        for record in records {
+            wtr.write_record(&record)?;
+        }
+        wtr.flush()?;
     }
 
     Ok(())
