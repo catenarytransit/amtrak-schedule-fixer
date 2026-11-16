@@ -323,6 +323,12 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     for stop in stops {
         let mut stop = stop;
+        // Vancouver Pacific Central Station is in America/Vancouver, not
+        // Mountain time. Use an IANA zone so GTFS consumers respect both
+        // PST and PDT rather than applying a fixed UTC offset.
+        if stop.id == "VAC" {
+            stop.timezone = Some("America/Vancouver".to_string());
+        }
         // Fix Los Baños bus stop
         // Currently it is listed as being a random house in Flin Flon, MB
         if stop.id.as_str() == LBO_STOP_ID {

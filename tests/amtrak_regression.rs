@@ -216,6 +216,64 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn cascades_vancouver_bc_timezone_follows_pacific_dst() -> Result<(), Box<dyn Error>> {
+    let pacific = TimeZone::get("America/Vancouver")?;
+    let eastern = TimeZone::get("America/New_York")?;
+    for (day, eastern_hour) in [
+        (date(2026, 11, 16), 11),
+        (date(2026, 7, 16), 11),
+    ] {
+        // Both regions move clocks together; a local 08:25 departure
+        // corresponds to an Eastern GTFS stop_time of 11:25.
+        let local = day.at(8, 25, 0, 0).to_zoned(pacific.clone())?;
+        let eastern_stop = day.at(eastern_hour, 25, 0, 0).to_zoned(eastern.clone())?;
+        assert_eq!(local.timestamp(), eastern_stop.timestamp());
+    }
+    let winter = date(2026, 11, 16).at(8, 25, 0, 0).to_zoned(pacific.clone())?;
+    let summer = date(2026, 7, 16).at(8, 25, 0, 0).to_zoned(pacific)?;
+    assert_eq!(winter.timestamp().to_string(), "2026-11-16T16:25:00Z");
+    assert_eq!(summer.timestamp().to_string(), "2026-07-16T15:25:00Z");
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires processed Amtrak GTFS; run scripts/test-amtrak-no-pfaedle.sh"]
+fn cascades_517_vac_departure_matches_published_pacific_timetable()
+-> Result<(), Box<dyn Error>> {
+    let root = Path::new("amtrak-gtfs");
+    let trips: Vec<Trip> = csv_rows(&root.join("trips.txt"))?;
+    let times: Vec<StopTime> = csv_rows(&root.join("stop_times.txt"))?;
+    let calendars: HashMap<_, _> = csv_rows::<Calendar>(&root.join("calendar.txt"))?
+        .into_iter().map(|c| (c.service_id.clone(), c)).collect();
+    let exceptions: HashMap<_, _> = if root.join("calendar_dates.txt").exists() {
+        csv_rows::<CalendarDate>(&root.join("calendar_dates.txt"))?
+            .into_iter().map(|d| ((d.service_id, d.date), d.exception_type)).collect()
+    } else { HashMap::new() };
+    let eastern = TimeZone::get("America/New_York")?;
+    let pacific = TimeZone::get("America/Vancouver")?;
+    let day = date(2026, 11, 16);
+    let expected = day.at(8, 25, 0, 0).to_zoned(pacific)?.timestamp();
+    let mut found = false;
+    for trip in trips.iter().filter(|t| t.trip_short_name.as_deref() == Some("517")) {
+        if !active_on(&trip.service_id, "20261116", 0, &calendars, &exceptions) {
+            continue;
+        }
+        for stop in times.iter().filter(|st| st.trip_id == trip.trip_id && st.stop_id == "VAC") {
+            let Some(seconds) = stop.departure_time.as_deref().and_then(seconds_from_gtfs) else {
+                continue;
+            };
+            let midnight = day.at(0, 0, 0, 0).to_zoned(eastern.clone())?;
+            let actual = midnight.checked_add(SignedDuration::from_secs(seconds))?;
+            if actual.timestamp() == expected {
+                found = true;
+            }
+        }
+    }
+    assert!(found, "Train 517 VAC must depart at 08:25 Vancouver local time on 2026-11-16 (16:25Z)");
+    Ok(())
+}
+
+#[test]
 fn gtfs_times_allow_service_day_overflow() {
     assert_eq!(seconds_from_gtfs("25:00:00"), Some(90_000));
     assert_eq!(seconds_from_gtfs("05:35:00"), Some(20_100));
