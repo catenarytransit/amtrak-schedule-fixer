@@ -1,27 +1,27 @@
 name: Update Amtrak files
 
 on:
-   workflow_call:
+  workflow_call:
 
 jobs:
-   upload-release-asset:
-     runs-on: ubuntu-latest
-     permissions:
-       contents: write
-       packages: write
+  upload-release-asset:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
 
-     steps:
-       - name: Checkout code
-         uses: actions/checkout@v3
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-       - name: Download unzip and zip
-         run: sudo apt install unzip zip
+      - name: Download unzip and zip
+        run: sudo apt install unzip zip
 
-       - name: install cmake and gcc
-         run: sudo apt install cmake gcc
- 
-       - name: Build Pfaedle
-         run: |
+      - name: install cmake and gcc
+        run: sudo apt install cmake gcc
+
+      - name: Build Pfaedle
+        run: |
           if ! command -v pfaedle &> /dev/null; then
             git clone --recurse-submodules https://github.com/ad-freiburg/pfaedle
             cd pfaedle
@@ -34,70 +34,70 @@ jobs:
             echo "Pfaedle is already installed."
           fi
 
-       - name: Download osm files
-         run: |
-           wget https://github.com/catenarytransit/osm-filter/releases/download/latest/railonly-north-america-latest.osm.pbf
-           
-           # Download chunk count
-           wget https://github.com/catenarytransit/osm-filter/releases/download/latest/pfaedle-filtered-us-latest-chunk-count.txt
-           count=$(cat pfaedle-filtered-us-latest-chunk-count.txt)
-           
-           # Download chunks
-           for ((i=0; i<count; i++)); do
-             printf -v padded_i "%02d" $i
-             wget "https://github.com/catenarytransit/osm-filter/releases/download/latest/pfaedle-filtered-us-latest-chunk-$padded_i"
-           done
-           
-           # Combine chunks
-           cat pfaedle-filtered-us-latest-chunk-* > pfaedle-filtered-us-latest.osm.pbf
+      - name: Download osm files
+        run: |
+          wget https://github.com/catenarytransit/osm-filter/releases/download/latest/railonly-north-america-latest.osm.pbf
+          
+          # Download chunk count
+          wget https://github.com/catenarytransit/osm-filter/releases/download/latest/pfaedle-filtered-us-latest-chunk-count.txt
+          count=$(cat pfaedle-filtered-us-latest-chunk-count.txt)
+          
+          # Download chunks
+          for ((i=0; i<count; i++)); do
+            printf -v padded_i "%02d" $i
+            wget "https://github.com/catenarytransit/osm-filter/releases/download/latest/pfaedle-filtered-us-latest-chunk-$padded_i"
+          done
+          
+          # Combine chunks
+          cat pfaedle-filtered-us-latest-chunk-* > pfaedle-filtered-us-latest.osm.pbf
 
-           # Delete chunks
-           rm pfaedle-filtered-us-latest-chunk-*
+          # Delete chunks
+          rm pfaedle-filtered-us-latest-chunk-*
 
-       - uses: actions-rust-lang/setup-rust-toolchain@v1
-         with:
-           rustflags: ''
-       
-       - name: Process
-         run: cargo run --release
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ''
 
-       - name: Run Pfaedle
-         run: |
-            pfaedle -x railonly-north-america-latest.osm.pbf amtrak-gtfs -F --inplace --mots rail --write-colors
-            pfaedle -x pfaedle-filtered-us-latest.osm.pbf amtrak-gtfs -F --inplace --mots bus --write-colors
+      - name: Process
+        run: cargo run --release
 
-       - name: Rezip
-         run: |
+      - name: Make shapeless version
+        run: |
+          cp -r amtrak-gtfs amtrak-gtfs-noshapes
+          rm -rf amtrak-gtfs-noshapes/shapes.txt
+          (cd amtrak-gtfs-noshapes && zip -r "$OLDPWD/amtrak-gtfs-noshapes-fixed.zip" .)
+
+      - name: Upload Shapeless Asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITUHB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          ASSET_PATH: amtrak-gtfs-noshapes-fixed.zip
+          ASSET_NAME: amtrak-gtfs-noshapes-fixed.zip
+          RELEASE_TAG: latest
+        run: |
+          echo "Uploading asset: $ASSET_PATH as $ASSET_NAME to release latest"
+          gh release upload latest "$ASSET_PATH" --clobber
+        shell: bash
+        if: env.ASSET_PATH != '' && env.ASSET_NAME != ''
+
+      - name: Run Pfaedle
+        run: |
+          pfaedle -x railonly-north-america-latest.osm.pbf amtrak-gtfs -F --inplace --mots rail --write-colors
+          pfaedle -x pfaedle-filtered-us-latest.osm.pbf amtrak-gtfs -F --inplace --mots bus --write-colors
+
+      - name: Rezip
+        run: |
           (cd amtrak-gtfs && zip -r "$OLDPWD/amtrak-gtfs-fixed.zip" .)
 
-       - name: Upload Asset
-         env:
+      - name: Upload Shaped Asset
+        env:
           GITHUB_TOKEN: ${{ secrets.GITUHB_TOKEN }}
           GH_TOKEN: ${{ github.token }}
-          ASSET_PATH: amtrak-gtfs-fixed.zip # Replace with the actual path to your file
-          ASSET_NAME: amtrak-gtfs-fixed.zip # Replace with the desired name of the asset
+          ASSET_PATH: amtrak-gtfs-fixed.zip
+          ASSET_NAME: amtrak-gtfs-fixed.zip
           RELEASE_TAG: latest
-         run: |
+        run: |
           echo "Uploading asset: $ASSET_PATH as $ASSET_NAME to release latest"
           gh release upload latest "$ASSET_PATH" --clobber
-         shell: bash
-         if: env.ASSET_PATH != '' && env.ASSET_NAME != ''
-
-       - name: Make shapeless version
-         run: |
-            cp -r amtrak-gtfs amtrak-gtfs-noshapes
-            rm -rf amtrak-gtfs-noshapes/shapes.txt
-            (cd amtrak-gtfs-noshapes && zip -r "$OLDPWD/amtrak-gtfs-noshapes-fixed.zip" .)
-
-       - name: Upload Asset
-         env:
-          GITHUB_TOKEN: ${{ secrets.GITUHB_TOKEN }}
-          GH_TOKEN: ${{ github.token }}
-          ASSET_PATH: amtrak-gtfs-noshapes-fixed.zip # Replace with the actual path to your file
-          ASSET_NAME: amtrak-gtfs-noshapes-fixed.zip # Replace with the desired name of the asset
-          RELEASE_TAG: latest
-         run: |
-          echo "Uploading asset: $ASSET_PATH as $ASSET_NAME to release latest"
-          gh release upload latest "$ASSET_PATH" --clobber
-         shell: bash
-         if: env.ASSET_PATH != '' && env.ASSET_NAME != ''
+        shell: bash
+        if: env.ASSET_PATH != '' && env.ASSET_NAME != ''
