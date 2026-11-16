@@ -15,6 +15,8 @@ const GTFS_URL: &str = "https://content.amtrak.com/content/gtfs/GTFS.zip";
 const DOWNLOAD_AND_UNZIP_INIT: bool = true;
 
 const TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES: [&str; 4] = ["1", "2", "343", "422"];
+const HISTORICAL_TRAINS: [&str; 7] = ["1", "2", "5", "6", "41", "4", "8"];
+const HISTORY_START: &str = "2026-10-17";
 
 const AGENCY_NAMES_TO_REMOVE: [&str; 3] = [
     // MARC is removed because the Maryland Transit Administration feed should be used instead
@@ -211,17 +213,10 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let mut trip_wtr = csv::Writer::from_path("./amtrak-gtfs/trips.txt")?;
     let mut stop_time_wtr = csv::Writer::from_path("./amtrak-gtfs/stop_times.txt")?;
     let mut stop_wtr = csv::Writer::from_path("./amtrak-gtfs/stops.txt")?;
-    let mut calendar_wtr = csv::Writer::from_path("./amtrak-gtfs/calendar.txt")?;
 
-    // Date-specific restorations for the Sunset Limited. Amtrak's GTFS times
-    // use Eastern agency time: a Sunday 22:00 departure in Los Angeles
-    // belongs to Monday's GTFS service day. Train 1 leaves New Orleans on
-    // Monday, Wednesday and Saturday at 09:00 Central.
-    //
-    // These exceptions restore dates even if the source calendar's validity
-    // starts later. They are assigned only to the new per-trip service IDs,
-    // leaving all unrelated services untouched.
-    let mut sunset_service_additions: Vec<(String, &'static str)> = Vec::new();
+    // Give each selected variant a private service ID to avoid collisions.
+    let mut cloned_exceptions: Vec<(String, String, String)> = Vec::new();
+    let mut history_variants: Vec<(String, String, String, String)> = Vec::new();
 
     // MARK: - Process trips
     let mut kept_trip_ids: HashSet<String> = HashSet::new();
@@ -242,34 +237,39 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         // Apply calendar
         let calendar = gtfs_initial_read.calendar.get(&trip.service_id).unwrap();
 
-        // Fix the calendar for possibly broken trips
-        if let Some(trip_short_name) = &trip.trip_short_name && TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES.contains(&trip_short_name.as_str()) {
-            let new_calendar = make_calendar_for_trip_short_name(
-                &trip.id,
-                &trip_short_name,
-                calendar.clone(),
-            );
-
-            if let Some(new_calendar) = new_calendar {
-                trip.service_id = new_calendar.id.clone();
-
-                match trip_short_name.as_str() {
-                    "1" => {
-                        // Sat 14 November departs New Orleans and arrives in
-                        // Los Angeles early Monday 16 November.
-                        sunset_service_additions.push((new_calendar.id.clone(), "20261114"));
-                        // Monday's departure should remain available, too.
-                        sunset_service_additions.push((new_calendar.id.clone(), "20261116"));
+        if route_ids_to_remove.contains(&trip.route_id) { continue; }
+        let short_name = trip.trip_short_name.as_deref().unwrap_or("");
+        let corrected_calendar = if TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES.contains(&short_name) {
+            make_calendar_for_trip_short_name(&trip.id, short_name, calendar.clone())
+        } else if HISTORICAL_TRAINS.contains(&short_name) {
+            let mut private = calendar.clone();
+            private.id = format!("catenary-history-{}", trip.id);
+            Some(private)
+        } else { None };
+        if let Some(new_calendar) = corrected_calendar {
+            let original_service = trip.service_id.clone();
+            trip.service_id = new_calendar.id.clone();
+            if HISTORICAL_TRAINS.contains(&short_name) {
+                if let Some(original_trip) = gtfs_initial_read.trips.get(&trip.id) {
+                    if let Some(first) = original_trip.stop_times.first() {
+                        history_variants.push((
+                            trip.route_id.clone(), short_name.to_string(),
+                            first.stop.id.clone(), new_calendar.id.clone(),
+                        ));
                     }
-                    "2" => {
-                        // Sun 15 November at 22:00 PST = Mon 16 November 06:00 EST.
-                        sunset_service_additions.push((new_calendar.id.clone(), "20261116"));
-                    }
-                    _ => {}
                 }
-
-                calendars_to_write.push(new_calendar);
             }
+            if let Some(exceptions) = gtfs_initial_read.calendar_dates.get(&original_service) {
+                for entry in exceptions {
+                    let kind = if entry.exception_type == gtfs_structures::Exception::Added { "1" } else { "2" };
+                    cloned_exceptions.push((
+                        new_calendar.id.clone(),
+                        entry.date.to_string().replace("-", ""),
+                        kind.to_string(),
+                    ));
+                }
+            }
+            calendars_to_write.push(new_calendar);
         }
 
         // Don't output this trip if it's on a removed route
@@ -328,31 +328,54 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     }
     route_wtr.flush()?;
 
-    for calendar_raw in calendars_to_write {
-        calendar_wtr.serialize(calendar_raw)?;
+    // A single earliest variant is eligible for backfill within each
+    // route/train/origin group. Tied starts are ambiguous and left unchanged.
+    let history_start = HISTORY_START.parse::<jiff::civil::Date>()?;
+    let mut groups: HashMap<(String, String, String), Vec<String>> = HashMap::new();
+    for (route, train, origin, service_id) in history_variants {
+        groups.entry((route, train, origin)).or_default().push(service_id);
     }
+    for ((route, train, origin), ids) in groups {
+        let mut variants: Vec<_> = calendars_to_write.iter().enumerate()
+            .filter(|(_, cal)| ids.contains(&cal.id))
+            .map(|(index, cal)| (index, cal.start_date))
+            .collect();
+        variants.sort_by_key(|(_, date)| *date);
+        let Some(&(index, earliest)) = variants.first() else { continue };
+        if variants.get(1).is_some_and(|(_, next)| *next == earliest) {
+            println!("Ambiguous history for {route} train {train}, origin {origin}; skipping");
+            continue;
+        }
+        if earliest.to_string().as_str() <= HISTORY_START { continue; }
+        let first_date = earliest.to_string().replace("-", "");
+        let selected_id = calendars_to_write[index].id.clone();
+        if cloned_exceptions.iter().any(|(id, date, _)| {
+            id == &selected_id && date.as_str() >= "20261017" && date < &first_date
+        }) {
+            println!("Existing historical exception for {route} train {train}; skipping");
+            continue;
+        }
+        calendars_to_write[index].start_date = history_start.to_string().parse()?;
+        println!("Extended {route} train {train} ({origin}) via {selected_id} back to {HISTORY_START}");
+    }
+    let mut calendar_wtr = csv::Writer::from_path("./amtrak-gtfs/calendar.txt")?;
+    for calendar in calendars_to_write { calendar_wtr.serialize(calendar)?; }
     calendar_wtr.flush()?;
 
-    // calendar_dates.txt is left in place by the fixer. Append overrides
-    // for the generated service IDs instead of modifying the original feed's
-    // exception entries or creating duplicate GTFS trip records.
-    if !sunset_service_additions.is_empty() {
+    // Preserve original exceptions and copy them to the new private IDs.
+    if !cloned_exceptions.is_empty() {
         let dates_path = target_dir.join("calendar_dates.txt");
         let needs_header = !dates_path.exists() || std::fs::metadata(&dates_path)?.len() == 0;
-        let output = std::fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&dates_path)?;
-        let mut dates_wtr = csv::WriterBuilder::new()
-            .has_headers(false)
-            .from_writer(output);
-        if needs_header {
-            dates_wtr.write_record(["service_id", "date", "exception_type"])?;
+        let output = std::fs::OpenOptions::new().append(true).create(true).open(&dates_path)?;
+        let mut writer = csv::WriterBuilder::new().has_headers(false).from_writer(output);
+        if needs_header { writer.write_record(["service_id", "date", "exception_type"])?; }
+        let mut seen = HashSet::new();
+        for (id, date, kind) in cloned_exceptions {
+            if seen.insert((id.clone(), date.clone())) {
+                writer.write_record([id, date, kind])?;
+            }
         }
-        for (service_id, date) in sunset_service_additions {
-            dates_wtr.write_record([service_id.as_str(), date, "1"])?;
-        }
-        dates_wtr.flush()?;
+        writer.flush()?;
     }
 
     Ok(())
