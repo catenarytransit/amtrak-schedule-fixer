@@ -381,3 +381,12 @@ fn historical_long_distance_trips_have_coverage_without_variant_collisions()
     }
     Ok(())
 }
+
+#[path = "../src/surfliner.rs"]
+mod surfliner;
+
+#[test]
+#[ignore = "requires processed Amtrak GTFS; run scripts/test-amtrak-no-pfaedle.sh"]
+fn daily_surfliner_emergency_schedule_november_23_to_29() -> Result<(), Box<dyn Error + Send + Sync>> {
+    surfliner::verify(Path::new("amtrak-gtfs"), date(2026, 11, 23), date(2026, 11, 29))
+}
