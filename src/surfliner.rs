@@ -461,6 +461,7 @@ fn add_exception(dates: &mut Table, service: &str, day: &str, kind: &str) {
 }
 
 /// Verify the processed output for the requested dates (local Pacific dates).
+#[cfg(test)]
 pub fn verify(root: &Path, start: Date, end: Date) -> Result<()> {
     let feed = Feed::read(root)?;
     let index = Index::new(&feed);
