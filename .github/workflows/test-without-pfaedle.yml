@@ -21,7 +21,9 @@ jobs:
       - name: Install ZIP utility
         run: sudo apt-get update && sudo apt-get install -y zip
       - name: Download, fix and validate feed (without pfaedle)
-        run: bash scripts/test-amtrak-no-pfaedle.sh
+        run: |
+          latest=$(curl --fail --silent --show-error --retry 3 https://data.iana.org/time-zones/tzdb/version)
+          LATEST_IANA_TZDB_VERSION="$latest" bash scripts/test-amtrak-no-pfaedle.sh
       - name: Upload tested feed
         if: always()
         uses: actions/upload-artifact@v4

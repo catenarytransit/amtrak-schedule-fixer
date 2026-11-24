@@ -23,6 +23,11 @@ const TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES: [&str; 4] = ["1", "2", "343", "422"]
 // departure instants must still match the published timetable.
 const HISTORICAL_TRAINS: [&str; 9] = ["1", "2", "5", "6", "41", "4", "8", "42", "517"];
 const HISTORY_START: &str = "2026-10-17";
+const CASCADES_WINTER_TRAINS: [&str; 3] = ["516", "518", "519"];
+// Start after the Eastern clock change so overnight stop_times retain their
+// published local times when the GTFS service day starts the previous day.
+const CASCADES_WINTER_HISTORY_START: &str = "2026-11-02";
+const CASCADES_WINTER_END: &str = "2027-03-13";
 
 const AGENCY_NAMES_TO_REMOVE: [&str; 3] = [
     // MARC is removed because the Maryland Transit Administration feed should be used instead
@@ -254,9 +259,12 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 .get(&trip.route_id)
                 .and_then(|route| route.long_name.as_deref())
                 .is_some_and(|name| name.trim().eq_ignore_ascii_case("Coast Starlight"));
+        let historical = HISTORICAL_TRAINS.contains(&short_name)
+            || (trip.route_id == "60" && CASCADES_WINTER_TRAINS.contains(&short_name))
+            || coast_starlight;
         let corrected_calendar = if TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES.contains(&short_name) {
             make_calendar_for_trip_short_name(&trip.id, short_name, calendar.clone())
-        } else if HISTORICAL_TRAINS.contains(&short_name) || coast_starlight {
+        } else if historical {
             let mut private = calendar.clone();
             private.id = format!("catenary-history-{}", trip.id);
             // The earliest Pennsylvanian 42 timetable variant is marked
@@ -279,7 +287,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         if let Some(new_calendar) = corrected_calendar {
             let original_service = trip.service_id.clone();
             trip.service_id = new_calendar.id.clone();
-            if HISTORICAL_TRAINS.contains(&short_name) || coast_starlight {
+            if historical {
                 if let Some(original_trip) = gtfs_initial_read.trips.get(&trip.id) {
                     if let Some(first) = original_trip.stop_times.first() {
                         history_variants.push((
@@ -333,10 +341,11 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     for stop in stops {
         let mut stop = stop;
-        // Use America/Vancouver for historical DST and BC's permanent
-        // UTC-7 from November 2026. The US Pacific zone still changes clocks.
-        if stop.id == "VAC" {
-            stop.timezone = Some("America/Vancouver".to_string());
+        // British Columbia and Washington now use different winter offsets.
+        match stop.id.as_str() {
+            "VAC" => stop.timezone = Some("America/Vancouver".into()),
+            "VAN" => stop.timezone = Some("America/Los_Angeles".into()),
+            _ => {}
         }
         // Fix Los Baños bus stop
         // Currently it is listed as being a random house in Flin Flon, MB
@@ -375,10 +384,10 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     // A single earliest variant is eligible for backfill within each
     // route/train/origin group. Tied starts are ambiguous and left unchanged.
-    let history_start = HISTORY_START.parse::<jiff::civil::Date>()?;
     // Amtrak's service dates use its Eastern agency timezone.
-    let today = jiff::Timestamp::now()
-        .to_zoned(timezone_database.get("America/New_York")?)
+    let today = timezone_database
+        .get("America/New_York")?
+        .to_datetime(jiff::Timestamp::now())
         .date();
     let coast_history_start = today - jiff::Span::new().days(coast_starlight::HISTORY_DAYS);
     let mut groups: HashMap<(String, String, String), Vec<String>> = HashMap::new();
@@ -426,20 +435,30 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             println!("Ambiguous history for {route} train {train}, origin {origin}; skipping");
             continue;
         }
-        if earliest.to_string().as_str() <= HISTORY_START {
+        let earliest = earliest.to_string();
+        let history_start = if route == "60" && CASCADES_WINTER_TRAINS.contains(&train.as_str()) {
+            if earliest.as_str() > CASCADES_WINTER_END {
+                continue;
+            }
+            CASCADES_WINTER_HISTORY_START
+        } else {
+            HISTORY_START
+        };
+        if earliest.as_str() <= history_start {
             continue;
         }
-        let first_date = earliest.to_string().replace("-", "");
+        let first_date = earliest.replace("-", "");
+        let history_start_ymd = history_start.replace("-", "");
         let selected_id = calendars_to_write[index].id.clone();
         if cloned_exceptions.iter().any(|(id, date, _)| {
-            id == &selected_id && date.as_str() >= "20261017" && date < &first_date
+            id == &selected_id && date >= &history_start_ymd && date < &first_date
         }) {
             println!("Existing historical exception for {route} train {train}; skipping");
             continue;
         }
-        calendars_to_write[index].start_date = history_start.to_string().parse()?;
+        calendars_to_write[index].start_date = history_start.parse()?;
         println!(
-            "Extended {route} train {train} ({origin}) via {selected_id} back to {HISTORY_START}"
+            "Extended {route} train {train} ({origin}) via {selected_id} back to {history_start}"
         );
     }
     let mut calendar_wtr = csv::Writer::from_path("./amtrak-gtfs/calendar.txt")?;
@@ -476,7 +495,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         let mut rdr = csv::Reader::from_path(&feed_info_path)?;
         let headers = rdr.headers()?.clone();
         let start_idx = headers.iter().position(|h| h == "feed_start_date");
-        let history_start_gtfs = history_start
+        let history_start_gtfs = HISTORY_START.parse::<jiff::civil::Date>()?
             .min(coast_history_start)
             .strftime("%Y%m%d")
             .to_string();
