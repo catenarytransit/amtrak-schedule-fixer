@@ -178,7 +178,7 @@ impl Feed {
     fn read(root: &Path) -> Result<Self> {
         let routes = Table::read(root, "routes.txt")?;
         let mut rail_routes: Vec<_> = routes.rows.iter().filter(|r| rail(r)).collect();
-        rail_routes.sort_by_key(|r| value(r, "route_id"));
+        rail_routes.sort_by(|a, b| value(a, "route_id").cmp(value(b, "route_id")));
         let base = rail_routes.first().ok_or("Pacific Surfliner rail route not found")?;
         let rail_route_id = value(base, "route_id").to_owned();
         let agency_id = value(base, "agency_id").to_owned();
@@ -312,7 +312,7 @@ pub fn apply(root: &Path) -> Result<()> {
                 if leg.bus && !active_exact.is_empty() { continue; }
                 // Prefer an active matching upstream rail variant; otherwise
                 // reactivate a matching inactive variant before synthesizing.
-                let selected = active_exact.first().map(|&&(t, s)| (t, s))
+                let selected = active_exact.first().map(|entry| **entry)
                     .or_else(|| exact.first().copied());
                 if let Some((trip, s)) = selected {
                     if !index.active(trip, shift(day, s)) {
