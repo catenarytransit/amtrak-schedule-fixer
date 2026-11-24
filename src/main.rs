@@ -89,7 +89,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let stop_times = gtfs_raw.stop_times.unwrap();
     let stops = gtfs_raw.stops.unwrap();
     let mut calendars_to_write = gtfs_raw.calendar.unwrap().unwrap();
-    let mut feed_info = gtfs_raw.feed_info.unwrap().unwrap();
 
     // MARK: - Removal of broken shapes
     let mut route_ids_to_remove_shapes_from: HashSet<String> = HashSet::new();
