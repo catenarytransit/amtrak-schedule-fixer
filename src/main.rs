@@ -48,6 +48,8 @@ const EWR_LON: f64 = -74.190556;
 // MARK: - main()
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
+    println!("Bundled IANA time zone database: {}", jiff_tzdb::VERSION);
+    let timezone_database = jiff::tz::TimeZoneDatabase::bundled();
     let client = reqwest::Client::new();
     let mut dest = File::create("./amtrak-gtfs.zip")?;
 
@@ -153,7 +155,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
             let initial_timezone_str = first_stop_time.stop.as_ref().timezone.as_ref().unwrap();
 
-            jiff::tz::TimeZone::get(initial_timezone_str)?;
+            timezone_database.get(initial_timezone_str)?;
 
             if initial_timezone_str != "America/New_York" {
                 let soonest_hr_to_break = match initial_timezone_str.as_str() {
