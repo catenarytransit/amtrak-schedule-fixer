@@ -216,23 +216,27 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn cascades_vancouver_bc_timezone_follows_pacific_dst() -> Result<(), Box<dyn Error>> {
-    let pacific = TimeZone::get("America/Vancouver")?;
+fn cascades_vancouver_bc_timezone_respects_permanent_pacific_time() -> Result<(), Box<dyn Error>> {
+    let vancouver = TimeZone::get("America/Vancouver")?;
     let eastern = TimeZone::get("America/New_York")?;
-    for (day, eastern_hour) in [
-        (date(2026, 11, 16), 11),
-        (date(2026, 7, 16), 11),
+    let us_pacific = TimeZone::get("America/Los_Angeles")?;
+    // BC adopted permanent UTC-7 in 2026; the US still falls back.
+    // https://news.gov.bc.ca/releases/2026AG0013-000209
+    for (day, eastern_hour, us_hour, utc) in [
+        (date(2025, 11, 16), 11, 8, "2025-11-16T16:25:00Z"),
+        (date(2026, 7, 16), 11, 8, "2026-07-16T15:25:00Z"),
+        (date(2026, 10, 31), 11, 8, "2026-10-31T15:25:00Z"),
+        (date(2026, 11, 1), 10, 7, "2026-11-01T15:25:00Z"),
+        (date(2026, 11, 16), 10, 7, "2026-11-16T15:25:00Z"),
+        (date(2027, 1, 16), 10, 7, "2027-01-16T15:25:00Z"),
     ] {
-        // Both regions move clocks together; a local 08:25 departure
-        // corresponds to an Eastern GTFS stop_time of 11:25.
-        let local = day.at(8, 25, 0, 0).to_zoned(pacific.clone())?;
+        let local = day.at(8, 25, 0, 0).to_zoned(vancouver.clone())?;
         let eastern_stop = day.at(eastern_hour, 25, 0, 0).to_zoned(eastern.clone())?;
-        assert_eq!(local.timestamp(), eastern_stop.timestamp());
+        let us_stop = day.at(us_hour, 25, 0, 0).to_zoned(us_pacific.clone())?;
+        assert_eq!(local.timestamp().to_string(), utc, "Vancouver on {day}");
+        assert_eq!(local.timestamp(), eastern_stop.timestamp(), "Eastern GTFS on {day}");
+        assert_eq!(local.timestamp(), us_stop.timestamp(), "US Pacific on {day}");
     }
-    let winter = date(2026, 11, 16).at(8, 25, 0, 0).to_zoned(pacific.clone())?;
-    let summer = date(2026, 7, 16).at(8, 25, 0, 0).to_zoned(pacific)?;
-    assert_eq!(winter.timestamp().to_string(), "2026-11-16T16:25:00Z");
-    assert_eq!(summer.timestamp().to_string(), "2026-07-16T15:25:00Z");
     Ok(())
 }
 
@@ -269,7 +273,7 @@ fn cascades_517_vac_departure_matches_published_pacific_timetable()
             }
         }
     }
-    assert!(found, "Train 517 VAC must depart at 08:25 Vancouver local time on 2026-11-16 (16:25Z)");
+    assert!(found, "Train 517 VAC must depart at 08:25 Vancouver local time on 2026-11-16 (15:25Z; 10:25 Eastern GTFS)");
     Ok(())
 }
 
