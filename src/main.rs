@@ -1,3 +1,5 @@
+mod surfliner;
+
 use bytesize::ByteSize;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -464,6 +466,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         wtr.flush()?;
     }
 
+    surfliner::apply(&target_dir)?;
     Ok(())
 }
 
