@@ -1,3 +1,4 @@
+mod coast_starlight;
 mod surfliner;
 
 use bytesize::ByteSize;
@@ -247,9 +248,15 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             continue;
         }
         let short_name = trip.trip_short_name.as_deref().unwrap_or("");
+        let coast_starlight = matches!(short_name, "11" | "14")
+            && gtfs_initial_read
+                .routes
+                .get(&trip.route_id)
+                .and_then(|route| route.long_name.as_deref())
+                .is_some_and(|name| name.trim().eq_ignore_ascii_case("Coast Starlight"));
         let corrected_calendar = if TRIP_SHORT_NAMES_WITH_CALENDAR_FIXES.contains(&short_name) {
             make_calendar_for_trip_short_name(&trip.id, short_name, calendar.clone())
-        } else if HISTORICAL_TRAINS.contains(&short_name) {
+        } else if HISTORICAL_TRAINS.contains(&short_name) || coast_starlight {
             let mut private = calendar.clone();
             private.id = format!("catenary-history-{}", trip.id);
             // The earliest Pennsylvanian 42 timetable variant is marked
@@ -272,7 +279,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         if let Some(new_calendar) = corrected_calendar {
             let original_service = trip.service_id.clone();
             trip.service_id = new_calendar.id.clone();
-            if HISTORICAL_TRAINS.contains(&short_name) {
+            if HISTORICAL_TRAINS.contains(&short_name) || coast_starlight {
                 if let Some(original_trip) = gtfs_initial_read.trips.get(&trip.id) {
                     if let Some(first) = original_trip.stop_times.first() {
                         history_variants.push((
@@ -369,6 +376,11 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     // A single earliest variant is eligible for backfill within each
     // route/train/origin group. Tied starts are ambiguous and left unchanged.
     let history_start = HISTORY_START.parse::<jiff::civil::Date>()?;
+    // Amtrak's service dates use its Eastern agency timezone.
+    let today = jiff::Timestamp::now()
+        .to_zoned(timezone_database.get("America/New_York")?)
+        .date();
+    let coast_history_start = today - jiff::Span::new().days(coast_starlight::HISTORY_DAYS);
     let mut groups: HashMap<(String, String, String), Vec<String>> = HashMap::new();
     for (route, train, origin, service_id) in history_variants {
         groups
@@ -383,6 +395,29 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             .filter(|(_, cal)| ids.contains(&cal.id))
             .map(|(index, cal)| (index, cal.start_date))
             .collect();
+        if matches!(train.as_str(), "11" | "14") {
+            // Add only missing service dates before the earliest published
+            // variant. Do not alter weekday flags or future calendar ranges.
+            let coast_variants = variants
+                .iter()
+                .map(|(index, start)| {
+                    Ok((
+                        calendars_to_write[*index].id.clone(),
+                        start.to_string().parse::<jiff::civil::Date>()?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, jiff::Error>>()?;
+            let additions = coast_starlight::historical_additions(
+                today,
+                &coast_variants,
+                &cloned_exceptions,
+            );
+            for (id, day, _) in &additions {
+                println!("Backfilled {route} train {train} ({origin}) on {day} via {id}");
+            }
+            cloned_exceptions.extend(additions);
+            continue;
+        }
         variants.sort_by_key(|(_, date)| *date);
         let Some(&(index, earliest)) = variants.first() else {
             continue;
@@ -441,7 +476,10 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         let mut rdr = csv::Reader::from_path(&feed_info_path)?;
         let headers = rdr.headers()?.clone();
         let start_idx = headers.iter().position(|h| h == "feed_start_date");
-        let history_start_gtfs = HISTORY_START.replace("-", "");
+        let history_start_gtfs = history_start
+            .min(coast_history_start)
+            .strftime("%Y%m%d")
+            .to_string();
 
         let mut records: Vec<csv::StringRecord> = Vec::new();
         for result in rdr.records() {
