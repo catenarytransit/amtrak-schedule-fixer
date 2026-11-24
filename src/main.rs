@@ -324,9 +324,8 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     for stop in stops {
         let mut stop = stop;
-        // Vancouver Pacific Central Station is in America/Vancouver, not
-        // Mountain time. Use an IANA zone so GTFS consumers respect both
-        // PST and PDT rather than applying a fixed UTC offset.
+        // Use America/Vancouver for historical DST and BC's permanent
+        // UTC-7 from November 2026. The US Pacific zone still changes clocks.
         if stop.id == "VAC" {
             stop.timezone = Some("America/Vancouver".to_string());
         }
