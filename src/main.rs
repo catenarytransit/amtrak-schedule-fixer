@@ -1,3 +1,5 @@
+mod surfliner;
+
 use bytesize::ByteSize;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -46,6 +48,8 @@ const EWR_LON: f64 = -74.190556;
 // MARK: - main()
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
+    println!("Bundled IANA time zone database: {}", jiff_tzdb::VERSION);
+    let timezone_database = jiff::tz::TimeZoneDatabase::bundled();
     let client = reqwest::Client::new();
     let mut dest = File::create("./amtrak-gtfs.zip")?;
 
@@ -87,7 +91,6 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let stop_times = gtfs_raw.stop_times.unwrap();
     let stops = gtfs_raw.stops.unwrap();
     let mut calendars_to_write = gtfs_raw.calendar.unwrap().unwrap();
-    let mut feed_info = gtfs_raw.feed_info.unwrap().unwrap();
 
     // MARK: - Removal of broken shapes
     let mut route_ids_to_remove_shapes_from: HashSet<String> = HashSet::new();
@@ -152,7 +155,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
             let initial_timezone_str = first_stop_time.stop.as_ref().timezone.as_ref().unwrap();
 
-            jiff::tz::TimeZone::get(initial_timezone_str)?;
+            timezone_database.get(initial_timezone_str)?;
 
             if initial_timezone_str != "America/New_York" {
                 let soonest_hr_to_break = match initial_timezone_str.as_str() {
@@ -323,9 +326,8 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     for stop in stops {
         let mut stop = stop;
-        // Vancouver Pacific Central Station is in America/Vancouver, not
-        // Mountain time. Use an IANA zone so GTFS consumers respect both
-        // PST and PDT rather than applying a fixed UTC offset.
+        // Use America/Vancouver for historical DST and BC's permanent
+        // UTC-7 from November 2026. The US Pacific zone still changes clocks.
         if stop.id == "VAC" {
             stop.timezone = Some("America/Vancouver".to_string());
         }
@@ -464,6 +466,7 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         wtr.flush()?;
     }
 
+    surfliner::apply(&target_dir)?;
     Ok(())
 }
 

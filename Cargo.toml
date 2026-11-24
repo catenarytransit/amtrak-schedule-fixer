@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 bytesize = "2.1.0"
-jiff = { version = "0.2", features = ["tzdb-bundle-always"] }
+jiff = { version = "1.0.2", features = ["tzdb-bundle-always"] }
+jiff-tzdb = "1.0.0"
 csv = "1.3.1"
 gtfs-structures = "0.45.1"
 reqwest = "0.12.23"

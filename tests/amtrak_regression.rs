@@ -1,7 +1,7 @@
 //! Live-feed regression checks. Run with scripts/test-amtrak-no-pfaedle.sh.
 //! The executable first writes the corrected GTFS feed to ./amtrak-gtfs.
 
-use jiff::{SignedDuration, civil::date, tz::TimeZone};
+use jiff::{SignedDuration, civil::date, tz::TimeZoneDatabase};
 use serde::Deserialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -107,26 +107,26 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
         HashMap::new()
     };
 
-    let la = TimeZone::get("America/Los_Angeles")?;
-    let eastern = TimeZone::get("America/New_York")?;
+    let la = TimeZoneDatabase::bundled().get("America/Los_Angeles")?;
+    let eastern = TimeZoneDatabase::bundled().get("America/New_York")?;
     let desired_departures = [
-        date(2026, 11, 15).at(22, 0, 0, 0).to_zoned(la.clone())?,
-        date(2026, 11, 18).at(22, 0, 0, 0).to_zoned(la.clone())?,
-        date(2026, 11, 20).at(22, 0, 0, 0).to_zoned(la.clone())?,
+        date(2026, 11, 15).at(22, 0, 0, 0).to_zoned_datetime(la.clone())?,
+        date(2026, 11, 18).at(22, 0, 0, 0).to_zoned_datetime(la.clone())?,
+        date(2026, 11, 20).at(22, 0, 0, 0).to_zoned_datetime(la.clone())?,
     ];
-    let central = TimeZone::get("America/Chicago")?;
+    let central = TimeZoneDatabase::bundled().get("America/Chicago")?;
     let desired_new_orleans_departures = [
         date(2026, 11, 16)
             .at(9, 0, 0, 0)
-            .to_zoned(central.clone())?,
+            .to_zoned_datetime(central.clone())?,
         date(2026, 11, 18)
             .at(9, 0, 0, 0)
-            .to_zoned(central.clone())?,
+            .to_zoned_datetime(central.clone())?,
         date(2026, 11, 21)
             .at(9, 0, 0, 0)
-            .to_zoned(central.clone())?,
+            .to_zoned_datetime(central.clone())?,
     ];
-    let desired_arrival = date(2026, 11, 16).at(5, 35, 0, 0).to_zoned(la.clone())?;
+    let desired_arrival = date(2026, 11, 16).at(5, 35, 0, 0).to_zoned_datetime(la.clone())?;
 
     // Amtrak's published GTFS times are in its agency timezone (Eastern),
     // including stop_times at Los Angeles. GTFS permits hours >= 24, so a
@@ -163,7 +163,7 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
             if !active_on(&trip.service_id, ymd, weekday, &calendars, &exceptions) {
                 continue;
             }
-            let origin = day.at(0, 0, 0, 0).to_zoned(eastern.clone())?;
+            let origin = day.at(0, 0, 0, 0).to_zoned_datetime(eastern.clone())?;
             if st.stop_id == "NOL" && trip.trip_short_name.as_deref() == Some("1") {
                 if let Some(seconds) = st.departure_time.as_deref().and_then(seconds_from_gtfs) {
                     let instant = origin.checked_add(SignedDuration::from_secs(seconds))?;
@@ -216,23 +216,27 @@ fn amtrak_november_2026_los_angeles_schedule() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn cascades_vancouver_bc_timezone_follows_pacific_dst() -> Result<(), Box<dyn Error>> {
-    let pacific = TimeZone::get("America/Vancouver")?;
-    let eastern = TimeZone::get("America/New_York")?;
-    for (day, eastern_hour) in [
-        (date(2026, 11, 16), 11),
-        (date(2026, 7, 16), 11),
+fn cascades_vancouver_bc_timezone_respects_permanent_pacific_time() -> Result<(), Box<dyn Error>> {
+    let vancouver = TimeZoneDatabase::bundled().get("America/Vancouver")?;
+    let eastern = TimeZoneDatabase::bundled().get("America/New_York")?;
+    let us_pacific = TimeZoneDatabase::bundled().get("America/Los_Angeles")?;
+    // BC adopted permanent UTC-7 in 2026; the US still falls back.
+    // https://news.gov.bc.ca/releases/2026AG0013-000209
+    for (day, eastern_hour, us_hour, utc) in [
+        (date(2025, 11, 16), 11, 8, "2025-11-16T16:25:00Z"),
+        (date(2026, 7, 16), 11, 8, "2026-07-16T15:25:00Z"),
+        (date(2026, 10, 31), 11, 8, "2026-10-31T15:25:00Z"),
+        (date(2026, 11, 1), 10, 7, "2026-11-01T15:25:00Z"),
+        (date(2026, 11, 16), 10, 7, "2026-11-16T15:25:00Z"),
+        (date(2027, 1, 16), 10, 7, "2027-01-16T15:25:00Z"),
     ] {
-        // Both regions move clocks together; a local 08:25 departure
-        // corresponds to an Eastern GTFS stop_time of 11:25.
-        let local = day.at(8, 25, 0, 0).to_zoned(pacific.clone())?;
-        let eastern_stop = day.at(eastern_hour, 25, 0, 0).to_zoned(eastern.clone())?;
-        assert_eq!(local.timestamp(), eastern_stop.timestamp());
+        let local = day.at(8, 25, 0, 0).to_zoned_datetime(vancouver.clone())?;
+        let eastern_stop = day.at(eastern_hour, 25, 0, 0).to_zoned_datetime(eastern.clone())?;
+        let us_stop = day.at(us_hour, 25, 0, 0).to_zoned_datetime(us_pacific.clone())?;
+        assert_eq!(local.timestamp().to_string(), utc, "Vancouver on {day}");
+        assert_eq!(local.timestamp(), eastern_stop.timestamp(), "Eastern GTFS on {day}");
+        assert_eq!(local.timestamp(), us_stop.timestamp(), "US Pacific on {day}");
     }
-    let winter = date(2026, 11, 16).at(8, 25, 0, 0).to_zoned(pacific.clone())?;
-    let summer = date(2026, 7, 16).at(8, 25, 0, 0).to_zoned(pacific)?;
-    assert_eq!(winter.timestamp().to_string(), "2026-11-16T16:25:00Z");
-    assert_eq!(summer.timestamp().to_string(), "2026-07-16T15:25:00Z");
     Ok(())
 }
 
@@ -249,10 +253,10 @@ fn cascades_517_vac_departure_matches_published_pacific_timetable()
         csv_rows::<CalendarDate>(&root.join("calendar_dates.txt"))?
             .into_iter().map(|d| ((d.service_id, d.date), d.exception_type)).collect()
     } else { HashMap::new() };
-    let eastern = TimeZone::get("America/New_York")?;
-    let pacific = TimeZone::get("America/Vancouver")?;
+    let eastern = TimeZoneDatabase::bundled().get("America/New_York")?;
+    let pacific = TimeZoneDatabase::bundled().get("America/Vancouver")?;
     let day = date(2026, 11, 16);
-    let expected = day.at(8, 25, 0, 0).to_zoned(pacific)?.timestamp();
+    let expected = day.at(8, 25, 0, 0).to_zoned_datetime(pacific)?.timestamp();
     let mut found = false;
     for trip in trips.iter().filter(|t| t.trip_short_name.as_deref() == Some("517")) {
         if !active_on(&trip.service_id, "20261116", 0, &calendars, &exceptions) {
@@ -262,14 +266,14 @@ fn cascades_517_vac_departure_matches_published_pacific_timetable()
             let Some(seconds) = stop.departure_time.as_deref().and_then(seconds_from_gtfs) else {
                 continue;
             };
-            let midnight = day.at(0, 0, 0, 0).to_zoned(eastern.clone())?;
+            let midnight = day.at(0, 0, 0, 0).to_zoned_datetime(eastern.clone())?;
             let actual = midnight.checked_add(SignedDuration::from_secs(seconds))?;
             if actual.timestamp() == expected {
                 found = true;
             }
         }
     }
-    assert!(found, "Train 517 VAC must depart at 08:25 Vancouver local time on 2026-11-16 (16:25Z)");
+    assert!(found, "Train 517 VAC must depart at 08:25 Vancouver local time on 2026-11-16 (15:25Z; 10:25 Eastern GTFS)");
     Ok(())
 }
 
@@ -380,4 +384,13 @@ fn historical_long_distance_trips_have_coverage_without_variant_collisions()
         }
     }
     Ok(())
+}
+
+#[path = "../src/surfliner.rs"]
+mod surfliner;
+
+#[test]
+#[ignore = "requires processed Amtrak GTFS; run scripts/test-amtrak-no-pfaedle.sh"]
+fn daily_surfliner_emergency_schedule_november_23_to_29() -> Result<(), Box<dyn Error + Send + Sync>> {
+    surfliner::verify(Path::new("amtrak-gtfs"), date(2026, 11, 23), date(2026, 11, 29))
 }
