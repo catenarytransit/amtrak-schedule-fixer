@@ -243,39 +243,120 @@ fn cascades_vancouver_bc_timezone_respects_permanent_pacific_time() -> Result<()
 
 #[test]
 #[ignore = "requires processed Amtrak GTFS; run scripts/test-amtrak-no-pfaedle.sh"]
-fn cascades_517_vac_departure_matches_published_pacific_timetable()
--> Result<(), Box<dyn Error>> {
+fn cascades_cross_border_trains_match_the_published_timetable() -> Result<(), Box<dyn Error>> {
+    use jiff::civil::Time;
+
+    #[derive(Deserialize)]
+    struct Stop {
+        stop_id: String,
+        stop_timezone: Option<String>,
+    }
+
     let root = Path::new("amtrak-gtfs");
     let trips: Vec<Trip> = csv_rows(&root.join("trips.txt"))?;
     let times: Vec<StopTime> = csv_rows(&root.join("stop_times.txt"))?;
     let calendars: HashMap<_, _> = csv_rows::<Calendar>(&root.join("calendar.txt"))?
-        .into_iter().map(|c| (c.service_id.clone(), c)).collect();
+        .into_iter()
+        .map(|c| (c.service_id.clone(), c))
+        .collect();
     let exceptions: HashMap<_, _> = if root.join("calendar_dates.txt").exists() {
         csv_rows::<CalendarDate>(&root.join("calendar_dates.txt"))?
-            .into_iter().map(|d| ((d.service_id, d.date), d.exception_type)).collect()
-    } else { HashMap::new() };
-    let eastern = TimeZoneDatabase::bundled().get("America/New_York")?;
-    let pacific = TimeZoneDatabase::bundled().get("America/Vancouver")?;
-    let day = date(2026, 11, 16);
-    let expected = day.at(8, 25, 0, 0).to_zoned_datetime(pacific)?.timestamp();
-    let mut found = false;
-    for trip in trips.iter().filter(|t| t.trip_short_name.as_deref() == Some("517")) {
-        if !active_on(&trip.service_id, "20261116", 0, &calendars, &exceptions) {
-            continue;
-        }
-        for stop in times.iter().filter(|st| st.trip_id == trip.trip_id && st.stop_id == "VAC") {
-            let Some(seconds) = stop.departure_time.as_deref().and_then(seconds_from_gtfs) else {
-                continue;
-            };
-            let midnight = day.at(0, 0, 0, 0).to_zoned_datetime(eastern.clone())?;
-            let actual = midnight.checked_add(SignedDuration::from_secs(seconds))?;
-            if actual.timestamp() == expected {
-                found = true;
+            .into_iter()
+            .map(|d| ((d.service_id, d.date), d.exception_type))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+    let stops = csv_rows::<Stop>(&root.join("stops.txt"))?;
+    for (id, zone) in [("VAC", "America/Vancouver"), ("VAN", "America/Los_Angeles")] {
+        assert_eq!(
+            stops
+                .iter()
+                .find(|stop| stop.stop_id == id)
+                .and_then(|stop| stop.stop_timezone.as_deref()),
+            Some(zone),
+            "incorrect timezone in stops.txt for {id}",
+        );
+    }
+
+    let db = TimeZoneDatabase::bundled();
+    let eastern = db.get("America/New_York")?;
+    let vancouver = db.get("America/Vancouver")?;
+    let us_pacific = db.get("America/Los_Angeles")?;
+
+    // Daily timetable effective November 1, 2026. Times are station-local.
+    let numbers = ["516", "517", "518", "519"];
+    let timetable = [
+        ("VAC", ["13:30", "08:25", "23:00", "17:55"]),
+        ("BEL", ["10:37", "09:14", "20:07", "18:44"]),
+        ("MVW", ["10:04", "09:43", "19:34", "19:13"]),
+        ("STW", ["09:51", "09:57", "19:21", "19:27"]),
+        ("EVR", ["09:21", "10:37", "18:51", "20:07"]),
+        ("EDM", ["08:56", "11:00", "18:26", "20:30"]),
+        ("SEA", ["08:30", "11:40", "18:00", "21:10"]),
+    ];
+    for local_day in [date(2026, 11, 21), date(2026, 11, 24)] {
+        for (column, number) in numbers.into_iter().enumerate() {
+            let northbound = column % 2 == 0;
+            for (stop_id, published_times) in timetable {
+                let zone = if stop_id == "VAC" {
+                    &vancouver
+                } else {
+                    &us_pacific
+                };
+                let clock = published_times[column].parse::<Time>()?;
+                let expected = local_day
+                    .to_datetime(clock)
+                    .to_zoned_datetime(zone.clone())?
+                    .timestamp();
+                let use_arrival =
+                    (northbound && stop_id == "VAC") || (!northbound && stop_id == "SEA");
+                let eastern_day = eastern.to_datetime(expected).date();
+                let mut matching_rows = 0;
+                // A GTFS stop_time can exceed 24:00, including train 518's northbound segment.
+                for back in 0..=2 {
+                    let service_day = eastern_day - jiff::Span::new().days(back);
+                    let ymd = service_day.strftime("%Y%m%d").to_string();
+                    let weekday = service_day.weekday().to_monday_zero_offset() as usize;
+                    let midnight = service_day
+                        .at(0, 0, 0, 0)
+                        .to_zoned_datetime(eastern.clone())?;
+                    for trip in trips.iter().filter(|trip| {
+                        trip.trip_short_name.as_deref() == Some(number)
+                            && active_on(&trip.service_id, &ymd, weekday, &calendars, &exceptions)
+                    }) {
+                        for stop in times
+                            .iter()
+                            .filter(|stop| stop.trip_id == trip.trip_id && stop.stop_id == stop_id)
+                        {
+                            let raw = if use_arrival {
+                                &stop.arrival_time
+                            } else {
+                                &stop.departure_time
+                            };
+                            if let Some(seconds) = raw.as_deref().and_then(seconds_from_gtfs) {
+                                let actual =
+                                    midnight.checked_add(SignedDuration::from_secs(seconds))?;
+                                matching_rows += usize::from(actual.timestamp() == expected);
+                            }
+                        }
+                    }
+                }
+                assert_eq!(
+                    matching_rows, 1,
+                    "train {number} at {stop_id} must have one event at {expected} on {local_day}"
+                );
             }
         }
     }
-    assert!(found, "Train 517 VAC must depart at 08:25 Vancouver local time on 2026-11-16 (15:25Z; 10:25 Eastern GTFS)");
     Ok(())
+}
+
+#[test]
+fn bundled_database_matches_latest_iana_release() {
+    if let Ok(latest) = std::env::var("LATEST_IANA_TZDB_VERSION") {
+        assert_eq!(jiff_tzdb::VERSION, latest.trim());
+    }
 }
 
 #[test]
@@ -435,7 +516,7 @@ fn coast_starlight_daily_service_includes_recent_history() -> Result<(), Box<dyn
     }
 
     let eastern = TimeZoneDatabase::bundled().get("America/New_York")?;
-    let today = jiff::Timestamp::now().to_zoned(eastern).date();
+    let today = eastern.to_datetime(jiff::Timestamp::now()).date();
 
     for (number, origin, terminal) in [("11", "SEA", "LAX"), ("14", "LAX", "SEA")] {
         for offset in 0..=coast_starlight::HISTORY_DAYS {
