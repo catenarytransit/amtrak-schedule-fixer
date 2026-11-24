@@ -96,3 +96,20 @@ source feed's unrelated calendar-date exceptions are preserved.
 
 The integration test checks all three weekday departure examples for each
 direction, in addition to train 1's 05:35 Los Angeles arrival on November 16.
+
+### Coast Starlight rolling historical coverage
+
+Coast Starlight trains 11 (Seattle to Los Angeles) and 14 (Los Angeles to
+Seattle) run daily and continue into the next calendar day. The fixer
+backfills the previous three Amtrak service dates when the official feed
+starts today, using the earliest unambiguous timetable variant and private
+service IDs. Service-date additions preserve stop times, later timetable
+variants, and existing calendar-date additions or removals. The rolling
+window is based on the current date in Amtrak's agency timezone
+(`America/New_York`), rather than a fixed historical date.
+
+The no-pfaedle regression suite checks exactly one active full-route trip
+per direction on each of the previous three service dates and today,
+including its overnight terminal arrival. The live check reports missing
+or ambiguous service instead of silently accepting it. Offline tests
+exercise the rolling window, variant selection, and exception preservation.

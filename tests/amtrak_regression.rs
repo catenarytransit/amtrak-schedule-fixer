@@ -20,6 +20,7 @@ struct Trip {
 struct StopTime {
     trip_id: String,
     stop_id: String,
+    stop_sequence: u32,
     arrival_time: Option<String>,
     departure_time: Option<String>,
 }
@@ -393,4 +394,83 @@ mod surfliner;
 #[ignore = "requires processed Amtrak GTFS; run scripts/test-amtrak-no-pfaedle.sh"]
 fn daily_surfliner_emergency_schedule_november_23_to_29() -> Result<(), Box<dyn Error + Send + Sync>> {
     surfliner::verify(Path::new("amtrak-gtfs"), date(2026, 11, 23), date(2026, 11, 29))
+}
+
+#[path = "../src/coast_starlight.rs"]
+mod coast_starlight;
+
+#[test]
+#[ignore = "requires processed Amtrak GTFS; run scripts/test-amtrak-no-pfaedle.sh"]
+fn coast_starlight_daily_service_includes_recent_history() -> Result<(), Box<dyn Error>> {
+    let root = Path::new("amtrak-gtfs");
+    let trips: Vec<Trip> = csv_rows(&root.join("trips.txt"))?;
+    let times: Vec<StopTime> = csv_rows(&root.join("stop_times.txt"))?;
+    let calendars: HashMap<_, _> = csv_rows::<Calendar>(&root.join("calendar.txt"))?
+        .into_iter()
+        .map(|c| (c.service_id.clone(), c))
+        .collect();
+    let exceptions: HashMap<_, _> = if root.join("calendar_dates.txt").exists() {
+        csv_rows::<CalendarDate>(&root.join("calendar_dates.txt"))?
+            .into_iter()
+            .map(|d| ((d.service_id, d.date), d.exception_type))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+
+    // Use stop_sequence rather than assuming CSV rows are ordered.
+    let mut endpoints: HashMap<&str, (&StopTime, &StopTime)> = HashMap::new();
+    for stop in &times {
+        endpoints
+            .entry(stop.trip_id.as_str())
+            .and_modify(|(first, last)| {
+                if stop.stop_sequence < first.stop_sequence {
+                    *first = stop;
+                }
+                if stop.stop_sequence > last.stop_sequence {
+                    *last = stop;
+                }
+            })
+            .or_insert((stop, stop));
+    }
+
+    let eastern = TimeZoneDatabase::bundled().get("America/New_York")?;
+    let today = jiff::Timestamp::now().to_zoned(eastern).date();
+
+    for (number, origin, terminal) in [("11", "SEA", "LAX"), ("14", "LAX", "SEA")] {
+        for offset in 0..=coast_starlight::HISTORY_DAYS {
+            let day = today - jiff::Span::new().days(offset);
+            let ymd = day.strftime("%Y%m%d").to_string();
+            let weekday = match day.weekday() {
+                jiff::civil::Weekday::Monday => 0,
+                jiff::civil::Weekday::Tuesday => 1,
+                jiff::civil::Weekday::Wednesday => 2,
+                jiff::civil::Weekday::Thursday => 3,
+                jiff::civil::Weekday::Friday => 4,
+                jiff::civil::Weekday::Saturday => 5,
+                jiff::civil::Weekday::Sunday => 6,
+            };
+            let active: Vec<_> = trips
+                .iter()
+                .filter(|trip| trip.trip_short_name.as_deref() == Some(number))
+                .filter(|trip| active_on(&trip.service_id, &ymd, weekday, &calendars, &exceptions))
+                .filter_map(|trip| endpoints.get(trip.trip_id.as_str()))
+                .filter(|(first, last)| first.stop_id == origin && last.stop_id == terminal)
+                .collect();
+            assert_eq!(
+                active.len(),
+                1,
+                "Coast Starlight {number} ({origin} -> {terminal}) on {day}: expected exactly one active full-route trip"
+            );
+            let (first, last) = *active[0];
+            let departure = first.departure_time.as_deref().and_then(seconds_from_gtfs);
+            let arrival = last.arrival_time.as_deref().and_then(seconds_from_gtfs);
+            assert!(
+                matches!((departure, arrival), (Some(dep), Some(arr)) if arr > dep && arr >= 86400),
+                "Coast Starlight {number} on {day} must retain its overnight stop times"
+            );
+            println!("Coast Starlight {number} on {day}: {}", first.trip_id);
+        }
+    }
+    Ok(())
 }
